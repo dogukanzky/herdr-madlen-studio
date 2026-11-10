@@ -8,6 +8,8 @@ export default class MadlenChat extends View {
     this.imageDrafts={};this.pasting=false;this.staged={};
     this.dragging=false;this.offset=0;this.viewport=400;this.viewportWidth=1000;this.contentHeight=400;this.follow=true;this.historyKey=0;this.data=null;this.error='';this.sendError='';this.pending=new Set();this.cache=new Map();this.positions=new Map();this.sending=false;this.expanded={};this.drafts={};this.target=null;
     this.input=TextareaState.new({placeholder:'Mesajınızı yazın…',rows:3});
+    this.input.set_auto_grow(3,10);
+    this.input.set_soft_wrap(true);
     this.input.on('submit',(e,cx)=>{if(!e.shift)this.send(cx);});
     this.input.on('paste_other',(_e,cx)=>this.pasteImages(cx));
     this.input.on('change',()=>{if(this.target){
@@ -191,7 +193,7 @@ export default class MadlenChat extends View {
       .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(t.border).bg(t.surface)
         .when((this.imageDrafts[target?.terminal]??[]).length>0,e=>e.child(h_flex().gap(8).flex_wrap().children(this.imageDrafts[target.terminal].map((a,i)=>this.thumbnail(a,`draft-${i}`,true)))))
         .on_drop((event,cx)=>this.pasteImages(cx,event.paths??[]))
-        .child(Textarea.new(this.input).h(58).w_full().text_size(15).text_color(t.foreground))
+        .child(Textarea.new(this.input).w_full().min_w(0).flex_none().text_size(15).text_color(t.foreground))
         .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
           .child(this.button('paste-image',this.pasting?'Ekleniyor…':'Görsel yapıştır',cx=>this.pasteImages(cx)))
           .child(this.button('chat-send',this.sending?'Gönderiliyor…':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
