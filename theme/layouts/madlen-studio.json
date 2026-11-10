@@ -168,15 +168,16 @@
                       },
                       "background": "background",
                       "border": {
-                        "width": 1,
+                        "width": 0,
                         "color": "border"
                       },
                       "focus": {
-                        "width": 1,
+                        "width": 0,
                         "color": "accent"
                       },
-                      "radius": 14,
-                      "gap": 12
+                      "radius": 0,
+                      "gap": 12,
+                      "lone": true
                     }
                   }
                 },

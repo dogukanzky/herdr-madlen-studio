@@ -13,7 +13,7 @@ Sekmeler, durum ikonları ve tema seçimi tek üst satırda. Sol çubukta çalı
 **Doğrulanan ortam:** macOS, Herdr Desktop 0.1.14, hc 0.1.19, Python 3.9+. Herdr açık olmalı; `herdr-app`, `hc` ve `python3` PATH üzerinde bulunmalı. Bu paket Herdr veya AI sağlayıcısı kurmaz; kendi hesaplarınla giriş yapmalısın. Linux/Windows için henüz doğrulanmış kurulum yok.
 
 ```sh
-git clone --branch v1.0.0 --depth 1 https://github.com/muratangin187/herdr-madlen-studio.git
+git clone --branch v1.0.1 --depth 1 https://github.com/muratangin187/herdr-madlen-studio.git
 cd herdr-madlen-studio
 python3 install.py
 ```
