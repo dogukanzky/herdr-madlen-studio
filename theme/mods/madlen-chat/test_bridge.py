@@ -14,7 +14,7 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNone(bridge.codex_item({'type':'userMessage','content':[{'type':'text','text':'# AGENTS.md instructions hidden'}]},1))
     def test_codex_user_text(self):
         v=bridge.codex_item({'type':'userMessage','content':[{'type':'text','text':'Merhaba'},{'type':'localImage','path':'/tmp/a.png'}]},1)
-        self.assertEqual(v['text'],'Merhaba');self.assertEqual(v['attachments'],['/tmp/a.png'])
+        self.assertEqual(v['text'],'Merhaba');self.assertEqual(len(v['attachments']),1)
     def test_claude_tools_and_result(self):
         rows=[{'uuid':'u','message':{'role':'user','content':'Merhaba'}},{'uuid':'a','message':{'role':'assistant','content':[{'type':'thinking','thinking':'private'},{'type':'text','text':'Bakıyorum'},{'type':'tool_use','id':'t','name':'Read','input':{'file_path':'test'}}]}},{'uuid':'r','message':{'role':'user','content':[{'type':'tool_result','tool_use_id':'t','content':'result'}]}}]
         with tempfile.TemporaryDirectory() as d:

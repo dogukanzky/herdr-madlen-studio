@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 import sys
 import binding as b
+import images
+import clipboard
+import time
 
 
 def terminal(address):
@@ -61,7 +64,7 @@ def codex_item(item,ordinal):
     typ=item.get('type'); id=str(item.get('id') or ordinal)
     if typ=='userMessage':
         text=clean(text_content(item.get('content')))
-        attachments=[c.get('path') for c in item.get('content',[]) if c.get('type')=='localImage' and c.get('path')]
+        attachments=images.from_content(item.get('content',[]))
         return dict(id=id,role='user',text=text,attachments=attachments) if text or attachments else None
     if typ=='agentMessage':return dict(id=id,role='assistant',text=item.get('text',''))
     if typ=='commandExecution':return tool(id,'Terminal komutu',item.get('command',''),item.get('status'),item.get('aggregatedOutput'))
@@ -116,10 +119,10 @@ def records(path,kind):
                 out.append(tool(p.get('call_id',rid),p.get('name','Araç'),p.get('arguments') or p.get('input','')))
             elif typ in ('function_call_output','custom_tool_call_output'):results[p.get('call_id')]=p.get('output')
         elif role in ('user','assistant'):
-            txt=clean(text_content(content))
-            if txt:
+            txt=clean(text_content(content));attachments=images.from_content(content) if role=='user' else []
+            if txt or attachments:
                 event=claude_system_event(r,txt,rid) if role=='user' else None
-                out.append(event if event is not None else dict(id=rid,role=role,text=txt))
+                out.append(event if event is not None else dict(id=rid,role=role,text=txt,attachments=attachments))
             for c in content if isinstance(content,list) else []:
                 if c.get('type')=='tool_use':out.append(tool(c.get('id',rid),c.get('name','Araç'),c.get('input',{})))
                 elif c.get('type')=='tool_result':results[c.get('tool_use_id')]=text_content(c.get('content'))
@@ -135,8 +138,8 @@ def snapshot(address):
     return dict(terminal=address,session=sid,kind=kind,status=status,messages=messages)
 
 
-def send(address,expected,text):
-    if not text.strip():raise ValueError('Mesaj boş olamaz.')
+def send(address,expected,text,attachments=None):
+    if not text.strip() and not attachments:raise ValueError('Mesaj boş olamaz.')
     if len(text)>50000:raise ValueError('Bu mesaj çok uzun. Terminal görünümünü kullanın.')
     t,kind,sid,path,projection=resolve(address)
     if sid!=expected:raise ValueError('Oturum değişti. Sohbeti yenileyip tekrar deneyin.')
@@ -144,11 +147,49 @@ def send(address,expected,text):
         raise ValueError('Agent çalışıyor veya yanıt bekliyor. Terminal görünümünden devam edin.')
     if text.lstrip().startswith('/'):
         raise ValueError('Slash komutlarını terminal görünümünde kullanın.')
+    staged=False
+    if attachments:
+        if not isinstance(attachments,list) or len(attachments)>3:raise ValueError('En fazla 3 görsel ekleyebilirsiniz.')
+        paths=[]
+        for path in attachments:
+            source=(images.HOME/path).resolve()
+            if source.parent!=(images.HOME/'data/madlen-chat/uploads').resolve() or not source.is_file():
+                raise ValueError('Görsel eki geçersiz; yeniden ekleyin.')
+            paths.append(source)
+        # Compile/validate before placing anything into the terminal's composer.
+        clipboard.helper()
+        try:
+            for path in paths:
+                current=resolve(address)
+                if current[2]!=expected or (current[0].get('status') or {}).get('state') not in ('idle','done'):
+                    raise ValueError('Oturum veya agent durumu değişti.')
+                before=b.run(['hc','read',address,'--lines','0','--json'])
+                screen=json.loads(before.stdout).get('text','')
+                marker=r'\[(?:Pasted )?[Ii]mage[^\]\n]*\]'
+                previous=len(re.findall(marker,screen))
+                staged=True
+                clipboard.attach(address,path)
+                accepted=False
+                for attempt in range(12):
+                    result=b.run(['hc','read',address,'--lines','0','--json'])
+                    after=json.loads(result.stdout).get('text','')
+                    if len(re.findall(marker,after))>previous:accepted=True;break
+                    time.sleep(0.15)
+                if not accepted:raise ValueError('Görselin terminale eklendiği doğrulanamadı.')
+            current=resolve(address)
+            if current[2]!=expected:raise ValueError('Oturum değişti.')
+            t=current[0]
+            if (t.get('status') or {}).get('state') not in ('idle','done'):raise ValueError('Agent henüz hazır değil.')
+        except Exception as e:
+            return dict(error=str(e)+' Görsel terminal taslağında olabilir; Terminal görünümünden kontrol edip gönderin.',attachments_staged=staged)
     # Core only supports --if idle/working; a completed TUI reports done.
     # Default send still rejects blocked programs; never use --force.
     guard=['--if','idle'] if (t.get('status') or {}).get('state')=='idle' else []
-    r=b.run(['hc','send',*guard,address,text])
-    if r.returncode:raise ValueError(r.stderr or 'Mesaj gönderilemedi.')
+    # Empty bracketed paste can make Claude re-read the image clipboard.
+    r=b.run(['hc','keys',address,'enter'] if staged and not text.strip() else ['hc','send',*guard,address,text])
+    if r.returncode:
+        if staged:return dict(error='Görseller terminal taslağına eklendi, mesaj gönderilemedi. Terminal görünümünden devam edin.',attachments_staged=True)
+        raise ValueError(r.stderr or 'Mesaj gönderilemedi.')
     result=json.loads(r.stdout)
     # started=false means the text was sent but no working signal arrived yet.
     # Treating that as a failed send would invite duplicate submissions.
@@ -156,9 +197,9 @@ def send(address,expected,text):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--terminal',required=True);p.add_argument('--session');p.add_argument('--text');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--terminal',required=True);p.add_argument('--session');p.add_argument('--text');p.add_argument('--attachments');a=p.parse_args()
     try:
-        result=send(a.terminal,a.session,a.text) if a.text is not None else snapshot(a.terminal)
+        result=send(a.terminal,a.session,a.text,json.loads(a.attachments) if a.attachments else None) if a.text is not None else snapshot(a.terminal)
         print(json.dumps(result,ensure_ascii=False))
     except Exception as e:
         print(json.dumps(dict(error=str(e)),ensure_ascii=False));return 1

@@ -13,7 +13,7 @@ Sekmeler, durum ikonları ve tema seçimi tek üst satırda. Sol çubukta çalı
 **Doğrulanan ortam:** macOS, Herdr Desktop 0.1.14, hc 0.1.19, Python 3.9+. Herdr açık olmalı; `herdr-app`, `hc` ve `python3` PATH üzerinde bulunmalı. Bu paket Herdr veya AI sağlayıcısı kurmaz; kendi hesaplarınla giriş yapmalısın. Linux/Windows için henüz doğrulanmış kurulum yok.
 
 ```sh
-git clone --branch v1.0.2 --depth 1 https://github.com/muratangin187/herdr-madlen-studio.git
+git clone --branch v1.0.3 --depth 1 https://github.com/muratangin187/herdr-madlen-studio.git
 cd herdr-madlen-studio
 python3 install.py
 ```
@@ -40,7 +40,9 @@ Bu seçenek ayrıca `outputs-browser` modunu ve `~/.local/share/herdr-outputs/He
 - Aynı yerel Codex/Claude Code terminaline bağlanır; yeni bir AI oturumu açmaz.
 - Mevcut yerel kayıtları okur. İlk açılışta oturum eşleşmesi gerekir; açılmış sohbetler bellekte tutulur. Kayıt yenilemesi 3 saniyede birdir, token düzeyinde canlı akış değildir.
 - Enter gönderir, Shift+Enter yeni satır açar. Gönderirken hedef oturum yeniden doğrulanır. Agent çalışıyorsa veya onay bekliyorsa gönderim reddedilir; taslak korunur.
-- Araç ve soru kartları geçmiş kayıt gösterimidir. İzinler, soru seçenekleri, dosya ekleri ve slash komutları Terminal’den kullanılır.
+- Araç ve soru kartları geçmiş kayıt gösterimidir. İzinler, soru seçenekleri, görsel dışındaki dosya ekleri ve slash komutları Terminal’den kullanılır.
+- Görseller sohbette önizlenir; tıklayınca büyür. Cmd+V veya “Görsel yapıştır” ile panodan ekleyin; göndermeden önce kaldırabilirsiniz. En fazla 3 görsel, görsel başına 20 MB. Görsel yapıştırma macOS Xcode Command Line Tools (`swiftc`) gerektirir; küçük yerel yardımcı ilk kullanımda derlenir. Görseller yalnızca Gönder ile mevcut agent oturumuna aktarılır.
+- Önizleme kopyaları ve taslak görseller Herdr klasörünün `data/madlen-chat/` dizininde yerel tutulur. Kaynak dosyası artık bulunmayan eski ekler gösterilemez.
 - Chat ana çalışma alanını kaplar; her split içinde ayrı Chat bulunmaz. Terminal’e dönünce mevcut bölmeler korunur. Uzak makine Chat’i desteklenmez.
 - Codex yerel veritabanı / Claude kayıt biçimleri resmi kararlı bir entegrasyon sözleşmesi değildir; sağlayıcı güncellemeleri uyarlama gerektirebilir. Eşleşme belirsizse başka bir sohbet tahmin edilmez.
 

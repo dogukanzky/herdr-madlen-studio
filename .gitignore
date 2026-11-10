@@ -4,3 +4,4 @@ __pycache__/
 *.zip
 *.app/
 artifacts/
+theme/data/

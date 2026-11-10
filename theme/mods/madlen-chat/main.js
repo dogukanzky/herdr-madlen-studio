@@ -1,12 +1,15 @@
 import { View, div, svg, image } from 'gpui-kit';
 import { h_flex, v_flex, TextView, Textarea, TextareaState } from 'gpui-base';
-import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome } from 'herdr';
+import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
 const find=(n,id)=>n?.id===id?n:(n?.children??[]).map(c=>find(c,id)).find(Boolean);
 export default class MadlenChat extends View {
   init(_props,cx) {
+    this.previewWidth=800;this.previewHeight=600;if(props()?.preview)return;
+    this.imageDrafts={};this.pasting=false;this.staged={};
     this.dragging=false;this.offset=0;this.viewport=400;this.viewportWidth=1000;this.contentHeight=400;this.follow=true;this.historyKey=0;this.data=null;this.error='';this.sendError='';this.pending=new Set();this.cache=new Map();this.positions=new Map();this.sending=false;this.expanded={};this.drafts={};this.target=null;
     this.input=TextareaState.new({placeholder:'Mesajınızı yazın…',rows:3});
     this.input.on('submit',(e,cx)=>{if(!e.shift)this.send(cx);});
+    this.input.on('paste_other',(_e,cx)=>this.pasteImages(cx));
     this.input.on('change',()=>{if(this.target){
         this.drafts[this.target.terminal]=this.input.value();
         this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});
@@ -56,6 +59,11 @@ export default class MadlenChat extends View {
         const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal],{timeout:20000});
         const data=JSON.parse(r.stdout);
         if(data.error)throw new Error(data.error);
+        const staged=this.staged[target.terminal];
+        if(staged&&(data.session!==staged.session||data.messages.filter(m=>m.role==='user').at(-1)?.id!==staged.last)){
+          delete this.staged[target.terminal];this.imageDrafts[target.terminal]=[];
+          if(this.target?.terminal===target.terminal)this.sendError='';
+        }
         this.cache.delete(target.terminal);this.cache.set(target.terminal,data);
         if(this.cache.size>12)this.cache.delete(this.cache.keys().next().value);
         if(this.target?.terminal===target.terminal){this.data=data;this.error='';}
@@ -63,16 +71,44 @@ export default class MadlenChat extends View {
       finally{this.pending.delete(target.terminal);cx.notify();}
     });
   }
+  pasteImages(cx,paths=[]) {
+    const target=this.target;if(!target||this.pasting||this.sending)return;
+    if((this.imageDrafts[target.terminal]??[]).length>=3){this.sendError='Bir mesaja en fazla 3 görsel ekleyebilirsiniz.';cx.notify();return;}
+    this.pasting=true;this.sendError='';cx.notify();
+    cx.spawn(async cx=>{
+      try{
+        const args=[`${appHome()}/mods/madlen-chat/clipboard.py`,...paths.slice(0,3).flatMap(p=>['--file',p])];
+        const result=JSON.parse((await exec('/usr/bin/python3',args,{timeout:100000})).stdout);
+        if(result.error)throw new Error(result.error);
+        const previous=this.imageDrafts[target.terminal]??[];
+        this.imageDrafts[target.terminal]=[...previous,...result.images.filter(p=>!previous.some(x=>x.path===p.path))].slice(0,3);
+      }catch(e){if(this.target?.terminal===target.terminal)this.sendError=String(e.message??e);}
+      finally{this.pasting=false;cx.notify();}
+    });
+  }
+  thumbnail(a,id,removable=false) {
+    const t=theme();
+    if(a.missing)return div().text_size(12).text_color(t.dim).child('Görsel artık bu bilgisayarda bulunamıyor.');
+    const width=Math.min(removable?110:280,Math.max(60,this.columnWidth()*0.7));
+    const scale=Math.min(width/a.width,(removable?76:190)/a.height,1);
+    return v_flex().id(id).flex_none().gap(4)
+      .child(div().rounded(10).overflow_hidden().cursor_pointer().tooltip('Görseli büyüt')
+        .on_click(()=>openOverlay({mod:'madlen-chat',kind:'dialog',width:0.88,height:0.88,props:{preview:a}}))
+        .child(image(a.path).w(Math.max(1,Math.round(a.width*scale))).h(Math.max(1,Math.round(a.height*scale)))))
+      .when(removable,e=>e.child(div().id(`remove-${id}`).text_size(11).text_color(t.dim).cursor_pointer()
+        .on_click((_e,cx)=>{if(this.sending||this.staged[this.target?.terminal])return;this.imageDrafts[this.target.terminal]=(this.imageDrafts[this.target.terminal]??[]).filter(x=>x.path!==a.path);cx.notify();}).child('Kaldır ×')));
+  }
   send(cx) {
-    const text=this.input.value().trim(), d=this.data, target=this.target;
-    if(!text||!d||this.sending||this.error)return;
+    const text=this.input.value().trim(), d=this.data, target=this.target, attachments=this.imageDrafts[target?.terminal]??[];
+    if((!text&&!attachments.length)||!d||this.sending||this.pasting||this.error||this.staged[target?.terminal])return;
     const status=terminals().find(t=>t.address===target?.terminal)?.status??d.status;
     if(!['idle','done'].includes(status)){this.sendError='Agent henüz hazır değil. Mesaj taslağınız korundu.';cx.notify();return;}
     this.sendError='';this.sending=true;cx.notify();
     cx.spawn(async cx=>{
       try{
-        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal,'--session',d.session,'--text',text],{timeout:20000});
-        const result=JSON.parse(r.stdout);if(result.error)throw new Error(result.error);
+        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal,'--session',d.session,'--text',text,...(attachments.length?['--attachments',JSON.stringify(attachments.map(a=>a.path))]:[])],{timeout:100000});
+        const result=JSON.parse(r.stdout);if(result.error){if(result.attachments_staged)this.staged[target.terminal]={session:d.session,last:d.messages.filter(m=>m.role==='user').at(-1)?.id};throw new Error(result.error);}
+        this.imageDrafts[target.terminal]=[];
         if(this.target?.terminal===target.terminal){this.input.set_value('');this.drafts[target.terminal]='';}
         this.refresh(cx);
       }catch(e){if(this.target?.terminal===target.terminal)this.sendError=String(e.message??e);}finally{this.sending=false;cx.notify();}
@@ -86,7 +122,7 @@ export default class MadlenChat extends View {
       .when(!user,e=>e.child(div().size(24).mt(5).flex_none().rounded_full().bg(t.selected).flex().items_center().justify_center().text_color(t.accent).overflow_hidden().child(image('mods/madlen-heading/mascot.webp').size(24))))
       .child(v_flex().min_w(0).max_w(user?this.columnWidth()*0.84:this.columnWidth()-36).when(!user,e=>e.flex_1().w_full()).gap(8).p(user?16:4).rounded(18).bg(user?'#5746db':t.canvas).text_color(user?'#ffffff':t.foreground)
         .child(user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
-        .when(Boolean(m.attachments?.length),e=>e.child(div().text_size(12).child(`${m.attachments.length} görsel eki · terminalde görüntüleyin`))));
+        .when(Boolean(m.attachments?.length),e=>e.child(h_flex().flex_wrap().gap(8).children(m.attachments.map((a,i)=>this.thumbnail(a,`attachment-${m.id}-${i}`))))));
   }
   tools(group,t){
     const id=group.id, open=this.expanded[id];
@@ -110,6 +146,13 @@ export default class MadlenChat extends View {
     .child(div().text_size(12).text_color(t.dim).child('Seçenekleri canlı terminalde yanıtlayın; burada geçmiş soru kartları da görünür.'))
     .child(h_flex().justify_end().child(this.button(`answer-${m.id}`,'Terminalde yanıtla →',()=>this.back(),true)));}
   render(cx) {
+    if(props()?.preview){
+      const a=props().preview,t=theme(),scale=Math.min(Math.max(1,this.previewWidth-40)/a.width,Math.max(1,this.previewHeight-64)/a.height,4);
+      return v_flex().id('image-preview').size_full().min_w(0).min_h(0).p(16).gap(12).bg(t.canvas)
+        .on_size_change((size,cx)=>{if(this.previewWidth!==size.width||this.previewHeight!==size.height){this.previewWidth=size.width;this.previewHeight=size.height;cx.notify();}})
+        .child(h_flex().justify_between().child(div().text_color(t.muted).child('Görsel')).child(this.button('close-preview','Kapat ×',()=>closeOverlay(props().overlay))))
+        .child(div().flex_1().min_h(0).flex().items_center().justify_center().child(image(a.path).w(Math.round(a.width*scale)).h(Math.round(a.height*scale))));
+    }
     const current=this.currentTarget();
     if(current?.terminal!==this.target?.terminal)this.refresh(cx);
     const t=theme(), target=this.target;
@@ -117,7 +160,7 @@ export default class MadlenChat extends View {
     const same=this.target?.terminal===target?.terminal&&target?.tab===activeTab;
     const data=same?this.data:null;
     const status=terminals().find(x=>x.address===target?.terminal)?.status??data?.status;
-    const ready=data&&!this.error&&!this.sending&&['idle','done'].includes(status);
+    const ready=data&&!this.error&&!this.sending&&!this.pasting&&!this.staged[target?.terminal]&&['idle','done'].includes(status);
     const groups=[];
     for(const m of data?.messages??[]){if(m.role==='tool'){if(groups.at(-1)?.role==='tools')groups.at(-1).items.push(m);else groups.push({id:`tools-${m.id}`,role:'tools',items:[m]});}else groups.push(m);}
 
@@ -146,8 +189,11 @@ export default class MadlenChat extends View {
           .on_mouse_down('left',(event,cx)=>{if(!event.local_position)return;this.dragging=true;this.scrollThumb(event.local_position.y,cx);cx.stop_propagation();})
           .child(div().absolute().top((this.viewport-8-this.thumbHeight())*(this.maxOffset()?this.offset/this.maxOffset():0)).w(9).h(this.thumbHeight()).rounded(5).bg(t.dim+'88')))))
       .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(t.border).bg(t.surface)
+        .when((this.imageDrafts[target?.terminal]??[]).length>0,e=>e.child(h_flex().gap(8).flex_wrap().children(this.imageDrafts[target.terminal].map((a,i)=>this.thumbnail(a,`draft-${i}`,true)))))
+        .on_drop((event,cx)=>this.pasteImages(cx,event.paths??[]))
         .child(Textarea.new(this.input).h(58).w_full().text_size(15).text_color(t.foreground))
-        .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar, soru yanıtları ve dosya ekleri için Terminal görünümünü kullanın.'))
+        .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
+          .child(this.button('paste-image',this.pasting?'Ekleniyor…':'Görsel yapıştır',cx=>this.pasteImages(cx)))
           .child(this.button('chat-send',this.sending?'Gönderiliyor…':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
   }
 }

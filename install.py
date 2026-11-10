@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 OWNER = 'herdr-madlen-studio'
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 REQUIRED_MODS = ('files', 'changes', 'new-menu', 'menu', 'machine-add')
 
 
@@ -30,7 +30,7 @@ def digest(path):
 
 
 def files(source):
-    return sorted(p for p in source.rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc')
+    return sorted(p for p in source.rglob('*') if p.is_file() and 'data' not in p.relative_to(source).parts and '__pycache__' not in p.parts and p.suffix != '.pyc')
 
 
 def install(source, home, activate=True, check=True, replace_modified=False):
