@@ -12,8 +12,8 @@ import time
 
 
 def terminal(address):
-    if not re.fullmatch(r'[A-Za-z0-9_-]+', address):
-        raise ValueError('Sohbet görünümü şu anda yerel oturumları destekliyor.')
+    if not re.fullmatch(r'[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)?', address):
+        raise ValueError('Geçersiz terminal adresi.')
     r=b.run(['hc','get',address,'--json'])
     if r.returncode: raise ValueError('Oturum bulunamadı; terminal görünümüne dönün.')
     t=json.loads(r.stdout); fg=t.get('foreground') or {}
@@ -132,6 +132,9 @@ def records(path,kind):
 
 
 def snapshot(address):
+    if "/" in address:
+        import remote
+        return remote.snapshot(address)
     t,kind,sid,path,projection=resolve(address)
     messages=projected(sid) if projection else records(path,kind)
     status=(t.get('status') or {}).get('state','idle')
@@ -139,6 +142,9 @@ def snapshot(address):
 
 
 def send(address,expected,text,attachments=None):
+    if "/" in address:
+        import remote
+        return remote.send(address,expected,text,attachments)
     if not text.strip() and not attachments:raise ValueError('Mesaj boş olamaz.')
     if len(text)>50000:raise ValueError('Bu mesaj çok uzun. Terminal görünümünü kullanın.')
     t,kind,sid,path,projection=resolve(address)

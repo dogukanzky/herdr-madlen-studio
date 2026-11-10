@@ -86,7 +86,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(bridge.b.bind_recent([('a',texts)],texts[-1],screen),'a')
         self.assertIsNone(bridge.b.bind_recent([('a',texts),('b',texts)],texts[-1],screen))
         self.assertIsNone(bridge.b.bind_recent([('a',[texts[-1]])],texts[-1],screen))
-    def test_remote_refused(self):
-        with self.assertRaisesRegex(ValueError,'yerel'):bridge.terminal('xps/t1')
+    def test_invalid_address_refused(self):
+        with self.assertRaisesRegex(ValueError,'Geçersiz'):bridge.terminal('xps/t1/invalid')
 
 if __name__=='__main__':unittest.main()

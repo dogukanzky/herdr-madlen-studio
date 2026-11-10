@@ -1,6 +1,6 @@
 # Madlen Studio for Herdr
 
-Madlen renkleriyle açık/koyu tema, sade agent listesi ve yerel Codex / Claude Code oturumları için Chat–Terminal görünümü.
+Madlen renkleriyle açık/koyu tema, sade agent listesi ve Codex / Claude Code oturumları için Chat–Terminal görünümü.
 
 Sekmeler, durum ikonları ve tema seçimi tek üst satırda. Sol çubukta çalışma alanları, agentlar, kullanım halkaları ve ayarlar var. Sohbette Madlen avatarı, sağa hizalı kullanıcı mesajları, açılır araç kayıtları ve genişliğe uyarlanan mesaj alanı bulunur. Sekme dönüşlerinde sohbet ve kaydırma konumu bellekte korunur.
 
@@ -37,13 +37,13 @@ Bu seçenek ayrıca `outputs-browser` modunu ve `~/.local/share/herdr-outputs/He
 
 ## Chat nasıl çalışır?
 
-- Aynı yerel Codex/Claude Code terminaline bağlanır; yeni bir AI oturumu açmaz.
+- Aynı Codex/Claude Code terminaline bağlanır; yeni bir AI oturumu açmaz.
 - Mevcut yerel kayıtları okur. İlk açılışta oturum eşleşmesi gerekir; açılmış sohbetler bellekte tutulur. Kayıt yenilemesi 3 saniyede birdir, token düzeyinde canlı akış değildir.
 - Enter gönderir, Shift+Enter yeni satır açar. Gönderirken hedef oturum yeniden doğrulanır. Agent çalışıyorsa veya onay bekliyorsa gönderim reddedilir; taslak korunur.
 - Araç ve soru kartları geçmiş kayıt gösterimidir. İzinler, soru seçenekleri, görsel dışındaki dosya ekleri ve slash komutları Terminal’den kullanılır.
 - Görseller sohbette önizlenir; tıklayınca büyür. Cmd+V veya “Görsel yapıştır” ile panodan ekleyin; göndermeden önce kaldırabilirsiniz. En fazla 3 görsel, görsel başına 20 MB. Görsel yapıştırma macOS Xcode Command Line Tools (`swiftc`) gerektirir; küçük yerel yardımcı ilk kullanımda derlenir. Görseller yalnızca Gönder ile mevcut agent oturumuna aktarılır.
 - Önizleme kopyaları ve taslak görseller Herdr klasörünün `data/madlen-chat/` dizininde yerel tutulur. Kaynak dosyası artık bulunmayan eski ekler gösterilemez.
-- Chat ana çalışma alanını kaplar; her split içinde ayrı Chat bulunmaz. Terminal’e dönünce mevcut bölmeler korunur. Uzak makine Chat’i desteklenmez.
+- Chat ana çalışma alanını kaplar; her split içinde ayrı Chat bulunmaz. Terminal’e dönünce mevcut bölmeler korunur. Herdr’a bağlı uzak makinelerde Chat desteklenir; uzak makinede Python 3.9+ gerekir. Kayıtlar o makinede okunur, metin mesajları tam makine/terminal adresine gönderilir. Uzak oturuma panodan görsel gönderme henüz desteklenmez.
 - Codex yerel veritabanı / Claude kayıt biçimleri resmi kararlı bir entegrasyon sözleşmesi değildir; sağlayıcı güncellemeleri uyarlama gerektirebilir. Eşleşme belirsizse başka bir sohbet tahmin edilmez.
 
 ## Güncelleme ve geri dönüş
@@ -54,7 +54,7 @@ Herdr’ın düzen seçicisinden eski düzeni seçebilir veya kurulumun yazdığ
 
 ## Gizlilik ve kaynaklar
 
-Bu repository gerçek sohbet, ekran görüntüsü, token, kullanıcı ayarı, makine adresi veya kişisel yedek içermez. Tema/Chat kodu kayıtları yerel okur; gönderim mevcut agent terminaline gider. Seçtiğiniz AI agentının kendi veri işleme davranışı değişmez. İsteğe bağlı quota aracı kendi sağlayıcı bağlantılarını kullanır; Çıktılar’daki HTML ve uzak görseller için kendi belgesine bakın.
+Bu repository gerçek sohbet, ekran görüntüsü, token, kullanıcı ayarı, makine adresi veya kişisel yedek içermez. Tema/Chat kodu kayıtları oturumun bulunduğu makinede okur; uzak kayıtlar mevcut Herdr makine bağlantısıyla taşınır; gönderim mevcut agent terminaline gider. Seçtiğiniz AI agentının kendi veri işleme davranışı değişmez. İsteğe bağlı quota aracı kendi sağlayıcı bağlantılarını kullanır; Çıktılar’daki HTML ve uzak görseller için kendi belgesine bakın.
 
 Herdr’ın resmi eklentisi değildir. Madlen marka varlıkları ve üçüncü taraf bileşenler için [THIRD_PARTY.md](THIRD_PARTY.md).
 

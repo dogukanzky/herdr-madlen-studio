@@ -11,5 +11,5 @@ This is a portable Herdr theme, not the user's Herdr home.
   `node test-chat-state.cjs` (Node is only a development dependency).
 - `extras/outputs/` is optional, local macOS source; do not execute its installer during
   a theme-only install. Do not change or replace a user's existing outputs-browser mod.
-- Chat must bind to the selected local process. Never guess a conversation by folder or time.
+- Chat must bind to the selected process on its actual machine. Never guess a conversation by folder or time.
 - Keep the installer transactional for theme files and preserve unrelated files and sessions.

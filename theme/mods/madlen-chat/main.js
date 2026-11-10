@@ -58,7 +58,7 @@ export default class MadlenChat extends View {
     this.pending.add(target.terminal);
     cx.spawn(async cx=>{
       try {
-        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal],{timeout:20000});
+        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal],{timeout:target.terminal.includes('/')?35000:20000});
         const data=JSON.parse(r.stdout);
         if(data.error)throw new Error(data.error);
         const staged=this.staged[target.terminal];
