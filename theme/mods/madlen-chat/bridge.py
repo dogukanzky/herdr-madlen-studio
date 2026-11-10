@@ -1,5 +1,6 @@
 """Local, read-only transcript adapter; sending always targets the verified live TUI."""
 import argparse
+from html import unescape
 import json
 from pathlib import Path
 import re
@@ -78,11 +79,31 @@ def projected(sid):
     return [v for i,raw in reversed(rows) if (v:=codex_item(json.loads(raw),i)) and (v.get('text') or v.get('attachments'))]
 
 
+def claude_system_event(record, text, rid):
+    """Use producer metadata, never XML-looking user text, to identify automation."""
+    origin=record.get('origin') or {}
+    kind=origin.get('kind') if isinstance(origin,dict) else None
+    automated=(kind=='task-notification' or record.get('turnOrigin')=='task_notification'
+               or record.get('promptSource')=='system' or record.get('isMeta') is True)
+    if not automated:return None
+    def field(name):
+        match=re.search(r'<'+name+r'>(.*?)</'+name+r'>',text,re.S)
+        return unescape(match.group(1).strip()) if match else ''
+    if kind=='task-notification' or record.get('turnOrigin')=='task_notification':
+        status=field('status')
+        summary=field('summary') or 'Arka plan görevi güncellendi.'
+        state='failed' if status in ('failed','error') else 'inProgress' if status in ('running','in_progress') else 'completed' if status=='completed' else 'unknown'
+        return tool('notification-'+rid,'Arka plan görevi',summary,state)
+    return tool('system-'+rid,'Sistem bildirimi',text)
+
+
 def records(path,kind):
     out=[]; results={}
     rows=list(enumerate(b.reverse_json(path)))
     for ordinal,r in reversed(rows):
         if r.get('isSidechain'):continue
+        # API request blobs duplicate turns and include hidden prompt wrappers.
+        if kind=='claude' and r.get('type') not in (None,'user','assistant'):continue
         p=r.get('payload',{}) if kind=='codex' else r.get('message',{})
         if kind=='codex' and r.get('type')!='response_item':continue
         role=p.get('role');content=p.get('content',[]);rid=r.get('uuid') or str(ordinal)
@@ -96,7 +117,9 @@ def records(path,kind):
             elif typ in ('function_call_output','custom_tool_call_output'):results[p.get('call_id')]=p.get('output')
         elif role in ('user','assistant'):
             txt=clean(text_content(content))
-            if txt:out.append(dict(id=rid,role=role,text=txt))
+            if txt:
+                event=claude_system_event(r,txt,rid) if role=='user' else None
+                out.append(event if event is not None else dict(id=rid,role=role,text=txt))
             for c in content if isinstance(content,list) else []:
                 if c.get('type')=='tool_use':out.append(tool(c.get('id',rid),c.get('name','Araç'),c.get('input',{})))
                 elif c.get('type')=='tool_result':results[c.get('tool_use_id')]=text_content(c.get('content'))

@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 OWNER = 'herdr-madlen-studio'
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 REQUIRED_MODS = ('files', 'changes', 'new-menu', 'menu', 'machine-add')
 
 

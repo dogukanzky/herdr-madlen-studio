@@ -21,6 +21,41 @@ class BridgeTests(unittest.TestCase):
             p=Path(d)/'test.jsonl';p.write_text('\n'.join(map(json.dumps,rows))+'\n{"partial":')
             m=bridge.records(p,'claude')
         self.assertEqual([x['role'] for x in m],['user','assistant','tool']);self.assertEqual(m[-1]['output'],'result');self.assertNotIn('private',str(m))
+    def claude_records(self,rows):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'events.jsonl';p.write_text('\n'.join(map(json.dumps,rows)))
+            return bridge.records(p,'claude')
+    def test_background_notification_is_tool_not_user(self):
+        body='<task-notification><task-id>fixture-task</task-id><status>completed</status><summary>Test command completed</summary></task-notification>'
+        rows=[{'type':'api-request-blob','message':{'role':'user','content':'<system-reminder>'+body+'</system-reminder>'}},
+              {'type':'user','uuid':'event','origin':{'kind':'task-notification'},'promptSource':'system','message':{'role':'user','content':body}}]
+        messages=self.claude_records(rows)
+        self.assertEqual(len(messages),1)
+        self.assertEqual(messages[0]['role'],'tool');self.assertEqual(messages[0]['name'],'Arka plan görevi')
+        self.assertEqual(messages[0]['text'],'Test command completed')
+        self.assertEqual(messages[0]['status'],'completed')
+    def test_user_xml_examples_are_preserved(self):
+        for text in ['<task-notification><status>failed</status><summary>Example</summary></task-notification>',
+                     '<system-reminder>This is my example</system-reminder>',
+                     'Explain this: <task-notification>example</task-notification>']:
+            message=self.claude_records([{'type':'user','uuid':'human','message':{'role':'user','content':text}}])[0]
+            self.assertEqual(message['role'],'user');self.assertEqual(message['text'],text)
+    def test_api_assistant_blob_is_not_a_duplicate_reply(self):
+        payload={'role':'assistant','content':'Reply'}
+        messages=self.claude_records([{'type':'api-request-blob','message':payload},{'type':'assistant','uuid':'real','message':payload}])
+        self.assertEqual(len(messages),1);self.assertEqual(messages[0]['id'],'real')
+    def test_failed_and_malformed_notifications_stay_non_user(self):
+        for body in ['<task-notification><status>failed</status><summary>A &amp; B</summary></task-notification>','<task-notification>partial']:
+            message=self.claude_records([{'type':'user','uuid':'event','turnOrigin':'task_notification','message':{'role':'user','content':body}}])[0]
+            self.assertEqual(message['role'],'tool')
+            self.assertNotIn('<task-notification>',message['text'])
+            if 'failed' in body:self.assertEqual(message['status'],'failed');self.assertEqual(message['text'],'A & B')
+    def test_meta_text_does_not_hide_tool_results(self):
+        rows=[{'type':'assistant','uuid':'a','message':{'role':'assistant','content':[{'type':'tool_use','id':'tool1','name':'Read','input':{}}]}},
+              {'type':'user','uuid':'r','isMeta':True,'message':{'role':'user','content':[{'type':'text','text':'System context'},{'type':'tool_result','tool_use_id':'tool1','content':'Result'}]}}]
+        messages=self.claude_records(rows)
+        self.assertEqual([m['role'] for m in messages],['tool','tool'])
+        self.assertEqual(messages[0]['output'],'Result')
     def test_send_refuses_changed_session_or_busy(self):
         with patch.object(bridge,'resolve',return_value=({'status':{'state':'idle'}},'codex','new',Path('/tmp'),True)),patch.object(bridge.b,'run') as run:
             with self.assertRaisesRegex(ValueError,'Oturum değişti'):bridge.send('t1','old','hello')
