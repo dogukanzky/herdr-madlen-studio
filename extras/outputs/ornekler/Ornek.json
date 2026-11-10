@@ -1,0 +1,33 @@
+{
+  "proje": "Herdr Çıktılar",
+  "aciklama": "Ekran görüntüleri için örnek veri",
+  "etkin": true,
+  "surum": 4,
+  "buyuk_tamsayi": 9007199254740993,
+  "dosyalar": [
+    {
+      "ad": "Kullanim.md",
+      "tur": "markdown",
+      "onizleme": true
+    },
+    {
+      "ad": "Ornek.json",
+      "tur": "json",
+      "onizleme": true
+    },
+    {
+      "ad": "Rapor.html",
+      "tur": "html",
+      "onizleme": true
+    }
+  ],
+  "arama": {
+    "baglam": true,
+    "ayrintilar": {
+      "ic": {
+        "hedef": "gizli-deger"
+      }
+    }
+  },
+  "sonuc": null
+}

@@ -1,0 +1,255 @@
+{
+  "id": "root",
+  "type": "row",
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "content": {
+            "mod": "madlen-chrome"
+          },
+          "size": {
+            "px": 64
+          },
+          "window_drag": true
+        },
+        {
+          "id": "madlen-nav",
+          "type": "block",
+          "content": {
+            "mod": "madlen-nav"
+          },
+          "size": {
+            "px": 192
+          }
+        },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            {
+              "id": "spaces",
+              "type": "block",
+              "content": {
+                "mod": "madlen-spaces"
+              },
+              "size": {
+                "weight": 0.550000011920929
+              },
+              "min": 90
+            },
+            {
+              "id": "agents",
+              "type": "block",
+              "content": {
+                "mod": "madlen-agents"
+              },
+              "size": {
+                "weight": 1.4500000476837158
+              },
+              "min": 90
+            }
+          ]
+        },
+        {
+          "id": "quota-section",
+          "type": "column",
+          "children": [
+            {
+              "id": "quota-label",
+              "type": "block",
+              "content": {
+                "mod": "madlen-chrome",
+                "props": {
+                  "section": "KULLANIM"
+                }
+              },
+              "size": {
+                "px": 24
+              }
+            },
+            {
+              "id": "quota",
+              "type": "block",
+              "content": {
+                "mod": "madlen-quota"
+              },
+              "size": {
+                "px": 54
+              }
+            }
+          ],
+          "size": {
+            "px": 80
+          },
+          "resizable": false
+        },
+        {
+          "id": "sidebar-footer",
+          "type": "block",
+          "content": {
+            "mod": "madlen-chrome",
+            "props": {
+              "footer": true
+            }
+          },
+          "size": {
+            "px": 48
+          }
+        }
+      ],
+      "size": {
+        "px": 320
+      },
+      "min": 44,
+      "max": 480,
+      "background": "chrome",
+      "resizable": false
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "children": [
+        {
+          "id": "workspace-topbar",
+          "type": "row",
+          "children": [
+            {
+              "id": "tabs",
+              "type": "block",
+              "content": {
+                "mod": "madlen-tabs"
+              },
+              "min": 80,
+              "window_drag": true
+            },
+            {
+              "id": "madlen-heading",
+              "type": "block",
+              "content": {
+                "mod": "madlen-heading"
+              },
+              "size": {
+                "px": 330
+              },
+              "window_drag": true
+            }
+          ],
+          "size": {
+            "px": 64
+          },
+          "resizable": false
+        },
+        {
+          "id": "work-body",
+          "type": "row",
+          "children": [
+            {
+              "id": "conversation-surface",
+              "type": "stack",
+              "children": [
+                {
+                  "id": "main",
+                  "type": "block",
+                  "content": {
+                    "tab": "active",
+                    "pane": {
+                      "header": {
+                        "content": {
+                          "mod": "madlen-pane"
+                        },
+                        "reveal": "always",
+                        "height": 38,
+                        "position": "top"
+                      },
+                      "background": "background",
+                      "border": {
+                        "width": 1,
+                        "color": "border"
+                      },
+                      "focus": {
+                        "width": 1,
+                        "color": "accent"
+                      },
+                      "radius": 14,
+                      "gap": 12
+                    }
+                  }
+                },
+                {
+                  "id": "madlen-chat-view",
+                  "type": "block",
+                  "content": {
+                    "mod": "madlen-chat"
+                  }
+                }
+              ],
+              "active": "madlen-chat-view"
+            },
+            {
+              "id": "panel",
+              "type": "column",
+              "children": [
+                {
+                  "id": "panel-body",
+                  "type": "stack",
+                  "children": [
+                    {
+                      "id": "files",
+                      "type": "block",
+                      "content": {
+                        "mod": "files"
+                      }
+                    },
+                    {
+                      "id": "changes",
+                      "type": "block",
+                      "content": {
+                        "mod": "changes"
+                      }
+                    }
+                  ],
+                  "active": "files"
+                }
+              ],
+              "size": {
+                "px": 368
+              },
+              "min": 280,
+              "max": 900,
+              "hidden": true
+            }
+          ],
+          "padding": [
+            8,
+            16
+          ],
+          "gap": 12
+        }
+      ],
+      "resizable": false
+    }
+  ],
+  "background": "canvas",
+  "theme": "madlen-cream",
+  "font": "JetBrains Mono",
+  "font_size": 14,
+  "ui_font": "Geist",
+  "terminal_padding": [
+    16,
+    16
+  ],
+  "divider": {
+    "width": 1,
+    "color": "border"
+  },
+  "titlebar": "none",
+  "traffic_lights": [
+    12,
+    16
+  ]
+}

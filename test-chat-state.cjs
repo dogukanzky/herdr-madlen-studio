@@ -1,0 +1,21 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+let active='a',selected='madlen-chat-view',saved=null,pending=[],calls=0;
+const views=[{tab:'a',pane:'pa',terminal:'ta',program:{name:'Codex'}},{tab:'b',pane:'pb',terminal:'tb',program:{name:'Claude Code'}}];
+const ctx={View:class {},Set,Map,Math,JSON,Boolean,String,theme:()=>({}),layout:()=>({id:'conversation-surface',active:selected}),shared:()=>saved,setShared:(_,v)=>saved=v,spaces:()=>[{active:true,tabs:[{id:active,active:true}]}],panes:()=>views,exec:()=>{calls++;return new Promise((resolve,reject)=>pending.push({resolve,reject}));},appHome:()=>'/tmp',run:()=>{throw Error('Unexpected navigation');}};
+let src=fs.readFileSync(require('path').join(__dirname,'theme/mods/madlen-chat/main.js'),'utf8').replace(/^import .*;\n/gm,'').replace('export default class MadlenChat','globalThis.MadlenChat = class MadlenChat');
+vm.createContext(ctx);vm.runInContext(src,ctx);
+const v=new ctx.MadlenChat();Object.assign(v,{pending:new Set(),cache:new Map(),positions:new Map(),drafts:{},input:{value:()=>'',set_value:()=>{}},viewport:400,historyKey:0});
+const jobs=[];const cx={notify(){},spawn(fn){jobs.push(fn(this));}};
+(async()=>{
+ v.refresh(cx);assert.equal(v.target.terminal,'ta');assert.equal(calls,1);
+ active='b';v.refresh(cx);assert.equal(v.target.terminal,'tb');assert.equal(calls,2);assert.equal(v.data,null);
+ pending[0].resolve({stdout:JSON.stringify({session:'sa',messages:['A']})});await jobs[0];assert.equal(v.data,null,'late A must not render in B');
+ pending[1].resolve({stdout:JSON.stringify({session:'sb',messages:['B']})});await jobs[1];assert.equal(v.data.session,'sb');
+ active='a';v.refresh(cx);assert.equal(v.data.session,'sa','cached A must render synchronously');assert.equal(selected,'madlen-chat-view');
+ v.refresh(cx);assert.equal(calls,3,'duplicate fetch prevented');
+ pending[2].reject(Error('late failure'));active='b';v.refresh(cx);await jobs[2];assert.equal(v.error,'','late A error must not render in B');
+ pending[3].resolve({stdout:JSON.stringify({session:'sb',messages:['B']})});await jobs[3];
+ active='shell';v.refresh(cx);assert.equal(v.data,null);assert.equal(selected,'madlen-chat-view');
+ v.viewportWidth=1600;assert.equal(v.columnWidth(),1528);v.viewportWidth=700;assert.equal(v.columnWidth(),628);
+ console.log('PASS: immediate tab binding, cached return, stale responses/errors, request deduplication, unsupported tab, responsive width');
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,0 +1,153 @@
+import { View, div, svg, image } from 'gpui-kit';
+import { h_flex, v_flex, TextView, Textarea, TextareaState } from 'gpui-base';
+import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome } from 'herdr';
+const find=(n,id)=>n?.id===id?n:(n?.children??[]).map(c=>find(c,id)).find(Boolean);
+export default class MadlenChat extends View {
+  init(_props,cx) {
+    this.dragging=false;this.offset=0;this.viewport=400;this.viewportWidth=1000;this.contentHeight=400;this.follow=true;this.historyKey=0;this.data=null;this.error='';this.sendError='';this.pending=new Set();this.cache=new Map();this.positions=new Map();this.sending=false;this.expanded={};this.drafts={};this.target=null;
+    this.input=TextareaState.new({placeholder:'Mesajınızı yazın…',rows:3});
+    this.input.on('submit',(e,cx)=>{if(!e.shift)this.send(cx);});
+    this.input.on('change',()=>{if(this.target){
+        this.drafts[this.target.terminal]=this.input.value();
+        this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});
+      }});
+    cx.timer.every(3000,cx=>this.refresh(cx));
+    this.refresh(cx);
+  }
+  columnWidth(){return Math.max(1,Math.round(this.viewportWidth-72));}
+  scrollThumb(y,cx){const track=Math.max(1,this.viewport-8-this.thumbHeight());this.offset=Math.max(0,Math.min(1,(y-this.thumbHeight()/2)/track))*this.maxOffset();this.follow=this.offset>=this.maxOffset()-3;cx.notify();}
+  maxOffset(){return Math.max(0,this.contentHeight-this.viewport);}
+  thumbHeight(){return Math.max(28,Math.min(this.viewport-8,(this.viewport-8)*this.viewport/Math.max(1,this.contentHeight)));}
+  back() {run('layout.select',{stack:'conversation-surface',child:'main'});if(this.target)run('pane.focus',{pane:this.target.pane});}
+  currentTarget() {
+    const tab=spaces().find(s=>s.active)?.tabs?.find(t=>t.active)?.id;
+    const candidates=panes().filter(p=>p.tab===tab&&p.terminal);
+    const saved=shared('madlen.chat.target');
+    const eligible=p=>['codex','claude'].some(a=>(p.app??p.program?.name??'').toLowerCase().includes(a));
+    const p=candidates.find(p=>p.pane===saved?.pane&&eligible(p))
+      ??candidates.find(p=>p.focused&&eligible(p))??candidates.find(eligible);
+    return p?{terminal:p.terminal,pane:p.pane,tab}:null;
+  }
+  refresh(cx) {
+    if(find(layout(),'conversation-surface')?.active!=='madlen-chat-view')return;
+    const target=this.currentTarget();
+    // An unsupported tab remains an explicit empty Chat view, not a forced mode switch.
+    if(!target){
+      if(this.target){this.drafts[this.target.terminal]=this.input.value();this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});}
+      this.target=null;this.data=null;this.error='';this.sendError='';return;
+    }
+    if(this.target?.terminal!==target.terminal){
+      if(this.target){
+        this.drafts[this.target.terminal]=this.input.value();
+        this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});
+      }
+      this.target=target;this.data=this.cache.get(target.terminal)??null;
+      this.error='';this.sendError='';this.input.set_value(this.drafts[target.terminal]??'');
+      const position=this.positions.get(target.terminal);
+      this.expanded=position?.expanded??{};this.follow=position?.follow??true;
+      this.contentHeight=position?.height??this.viewport;
+      this.offset=this.follow?this.maxOffset():Math.min(position?.offset??0,this.maxOffset());this.historyKey++;
+    }
+    if(shared('madlen.chat.target')?.pane!==target.pane)setShared('madlen.chat.target',target);
+    if(this.pending.has(target.terminal))return;
+    this.pending.add(target.terminal);
+    cx.spawn(async cx=>{
+      try {
+        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal],{timeout:20000});
+        const data=JSON.parse(r.stdout);
+        if(data.error)throw new Error(data.error);
+        this.cache.delete(target.terminal);this.cache.set(target.terminal,data);
+        if(this.cache.size>12)this.cache.delete(this.cache.keys().next().value);
+        if(this.target?.terminal===target.terminal){this.data=data;this.error='';}
+      }catch(e){if(this.target?.terminal===target.terminal)this.error=String(e.message??e);}
+      finally{this.pending.delete(target.terminal);cx.notify();}
+    });
+  }
+  send(cx) {
+    const text=this.input.value().trim(), d=this.data, target=this.target;
+    if(!text||!d||this.sending||this.error)return;
+    const status=terminals().find(t=>t.address===target?.terminal)?.status??d.status;
+    if(!['idle','done'].includes(status)){this.sendError='Agent henüz hazır değil. Mesaj taslağınız korundu.';cx.notify();return;}
+    this.sendError='';this.sending=true;cx.notify();
+    cx.spawn(async cx=>{
+      try{
+        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal,'--session',d.session,'--text',text],{timeout:20000});
+        const result=JSON.parse(r.stdout);if(result.error)throw new Error(result.error);
+        if(this.target?.terminal===target.terminal){this.input.set_value('');this.drafts[target.terminal]='';}
+        this.refresh(cx);
+      }catch(e){if(this.target?.terminal===target.terminal)this.sendError=String(e.message??e);}finally{this.sending=false;cx.notify();}
+    });
+  }
+  button(id,label,action,primary=false){const t=theme();return h_flex().id(id).h(30).px(12).gap(6).items_center().rounded(8).cursor_pointer().bg(primary?t.solid:t.surface).text_color(primary?t.solid_foreground:t.muted).hover(s=>s.bg(primary?t.accent:t.hover)).on_click((_e,cx)=>action(cx)).child(label);}
+  markdown(id,text){return TextView.markdown(`${this.data?.session??'loading'}-${id}`,text).scrollable(false).w_full().min_w(0).text_size(15).text_color(theme().foreground);}
+  message(m,t) {
+    const user=m.role==='user';
+    return h_flex().id(`message-${m.id}`).w_full().max_w(this.columnWidth()).flex_none().gap(12).items_start().when(user,e=>e.justify_end())
+      .when(!user,e=>e.child(div().size(24).mt(5).flex_none().rounded_full().bg(t.selected).flex().items_center().justify_center().text_color(t.accent).overflow_hidden().child(image('mods/madlen-heading/mascot.webp').size(24))))
+      .child(v_flex().min_w(0).max_w(user?this.columnWidth()*0.84:this.columnWidth()-36).when(!user,e=>e.flex_1().w_full()).gap(8).p(user?16:4).rounded(18).bg(user?'#5746db':t.canvas).text_color(user?'#ffffff':t.foreground)
+        .child(user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
+        .when(Boolean(m.attachments?.length),e=>e.child(div().text_size(12).child(`${m.attachments.length} görsel eki · terminalde görüntüleyin`))));
+  }
+  tools(group,t){
+    const id=group.id, open=this.expanded[id];
+    return v_flex().id(id).flex_none().pl(40).mt(-6).mb(2).w_full().max_w(this.columnWidth()).min_w(0).items_start()
+      .child(h_flex().id(`toggle-${id}`).h(24).gap(7).items_center().text_size(12).text_color(t.dim).cursor_pointer()
+        .hover(s=>s.text_color(t.muted)).tooltip(open?'Araç ayrıntılarını gizle':'Araç ayrıntılarını göster')
+        
+        .on_click((_e,cx)=>{this.follow=false;this.expanded[id]=!open;cx.notify();})
+        .child(div().text_size(10).child(open?'▾':'▸'))
+        .child(div().child(`${group.items.length} araç işlemi`)))
+      .when(open,e=>e.child(v_flex().w_full().mt(8).pl(14).pb(8).border_l(1).border_color(t.border).gap(10).children(group.items.map(m=>v_flex().gap(5).pt(10).border_t(1).border_color(t.border)
+        .child(h_flex().gap(8).child(div().font_medium().child(m.name)).child(div().text_size(11).text_color(m.status==='failed'?t.blocked:t.dim).child(m.status==='failed'?'Hata':m.status==='inProgress'?'Çalışıyor':'Araç kaydı')))
+        .child(this.markdown(`tool-${m.id}`,'```text\n'+m.text.slice(0,5000)+'\n```'))
+        .when(Boolean(m.output),x=>x.child(this.markdown(`result-${m.id}`,'```text\n'+m.output.slice(0,5000)+'\n```')))))));
+  }
+  question(m,t){return v_flex().flex_none().ml(40).max_w(this.columnWidth()-40).p(20).gap(14).rounded(18).border(1).border_color(t.accent+'66').bg(t.selected)
+    .child(h_flex().justify_between().child(div().font_semibold().text_size(12).text_color(t.accent).child('SORULAR')).child(div().text_size(12).text_color(t.dim).child('Oturum kaydı')))
+    .children((m.questions??[]).map((q,i)=>v_flex().gap(10).child(div().font_semibold().child(q.question??q.title??q.header??'Soru'))
+      .children((q.options??[]).map((o,j)=>v_flex().p(12).gap(4).rounded(10).border(1).border_color(t.border).bg(t.surface)
+        .child(div().child(`○  ${typeof o==='string'?o:o.label??''}`)).when(Boolean(o.description),e=>e.child(div().text_size(12).text_color(t.dim).child(o.description)))))))
+    .child(div().text_size(12).text_color(t.dim).child('Seçenekleri canlı terminalde yanıtlayın; burada geçmiş soru kartları da görünür.'))
+    .child(h_flex().justify_end().child(this.button(`answer-${m.id}`,'Terminalde yanıtla →',()=>this.back(),true)));}
+  render(cx) {
+    const current=this.currentTarget();
+    if(current?.terminal!==this.target?.terminal)this.refresh(cx);
+    const t=theme(), target=this.target;
+    const activeTab=spaces().find(s=>s.active)?.tabs?.find(t=>t.active)?.id;
+    const same=this.target?.terminal===target?.terminal&&target?.tab===activeTab;
+    const data=same?this.data:null;
+    const status=terminals().find(x=>x.address===target?.terminal)?.status??data?.status;
+    const ready=data&&!this.error&&!this.sending&&['idle','done'].includes(status);
+    const groups=[];
+    for(const m of data?.messages??[]){if(m.role==='tool'){if(groups.at(-1)?.role==='tools')groups.at(-1).items.push(m);else groups.push({id:`tools-${m.id}`,role:'tools',items:[m]});}else groups.push(m);}
+
+    return v_flex().id('madlen-chat-root').size_full().min_w(0).min_h(0).font_family('Helvetica Neue').text_size(14).text_color(t.foreground).bg(t.canvas)
+      .on_mouse_up('left',()=>{this.dragging=false;}).on_hover(inside=>{if(!inside)this.dragging=false;})
+      .child(h_flex().h(42).flex_none().px(16).gap(10).items_center().bg(t.chrome).border_b(1).border_color(t.border)
+        .child(div().font_medium().child(`${data?.kind==='claude'?'Claude Code':'Codex'} · Sohbet`))
+        .child(div().flex_1().truncate().text_size(12).text_color(status==='working'?t.working:status==='blocked'?t.blocked:t.done).child(status==='working'?'● Çalışıyor…':status==='blocked'?'● Yanıtınızı bekliyor':['idle','done'].includes(status)?'✓ Yanıt tamamlandı · Yeni mesaj gönderebilirsiniz':'Oturum bağlanıyor…'))
+        .when(!this.follow&&this.maxOffset()-this.offset>3,e=>e.child(this.button('chat-latest','Son mesaj ↓',cx=>{this.follow=true;this.offset=this.maxOffset();cx.notify();})))
+        .child(this.button('chat-refresh','Yenile',cx=>this.refresh(cx)))
+        .child(h_flex().p(3).gap(2).rounded(8).bg(t.hover).child(div().px(10).py(4).rounded(6).bg(t.surface).text_color(t.accent).child('Chat')).child(this.button('back-terminal','Terminal',()=>this.back())))
+        .children([['split-right','Sağa böl','right'],['split-down','Alta böl','down']].map(([icon,label,direction])=>div().id(`chat-${icon}`).p(6).tooltip(label).cursor_pointer().on_click(()=>{this.back();run('pane.split',{pane:target?.pane,direction});}).child(svg(`mods/madlen-pane/${icon}.svg`).size(14).text_color(t.dim)))))
+      .when(Boolean(this.error||this.sendError),e=>e.child(h_flex().flex_none().p(12).gap(12).bg(t.selected).text_color(t.accent).child(div().flex_1().child(this.sendError||this.error)).child(this.button('error-terminal','Terminale dön',()=>this.back()))))
+      .child(div().id('chat-viewport').relative().flex_1().min_h(0).w_full().overflow_hidden()
+        .on_size_change((size,cx)=>{const h=Math.round(size.height),w=Math.round(size.width);if(h!==this.viewport||w!==this.viewportWidth){this.viewport=h;this.viewportWidth=w;this.offset=this.follow?this.maxOffset():Math.min(this.offset,this.maxOffset());cx.notify();}})
+        .on_mouse_move((e,cx)=>{if(!this.dragging||!e.local_position)return;this.scrollThumb(e.local_position.y-4,cx);})
+        .on_scroll_wheel((e,cx)=>{const dy=e.delta?.y??0;if(!dy)return;this.offset=Math.max(0,Math.min(this.maxOffset(),this.offset-dy));this.follow=this.offset>=this.maxOffset()-3;cx.stop_propagation();cx.notify();})
+        .child(v_flex().id(`chat-content-${this.historyKey}`).absolute().top(-this.offset).left(0).right(16).px(28).py(22).gap(18).items_start()
+          .on_size_change((size,cx)=>{const h=Math.ceil(size.height);if(h!==this.contentHeight){this.contentHeight=h;this.offset=this.follow?this.maxOffset():Math.min(this.offset,this.maxOffset());cx.notify();}})
+          .when(!data,e=>e.child(div().text_color(t.dim).child(!target?'Bu sekmede desteklenen bir sohbet yok. Terminal görünümünü açabilirsiniz.':this.error?'Terminal oturumunuz çalışmaya devam ediyor.':'Sohbet yükleniyor…')))
+          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):this.message(m,t)))
+          .child(h_flex().flex_none().pl(40).gap(8).items_center().text_size(12).text_color(status==='working'?t.working:status==='blocked'?t.blocked:t.done)
+            .when(status==='working',e=>e.child(svg('mods/madlen-chrome/spinner.svg').size(12).spin(900)))
+            .child(div().child(status==='working'?'Yanıt hazırlanıyor…':status==='blocked'?'Devam etmek için yanıtınız gerekiyor.':['idle','done'].includes(status)?'✓ Yanıt tamamlandı':'Oturum bağlanıyor…'))))
+        .when(this.maxOffset()>0,e=>e.child(div().id('chat-scroll-track').absolute().right(3).top(4).bottom(4).w(9).rounded(5).bg(t.border+'55').cursor_pointer()
+          .on_mouse_down('left',(event,cx)=>{if(!event.local_position)return;this.dragging=true;this.scrollThumb(event.local_position.y,cx);cx.stop_propagation();})
+          .child(div().absolute().top((this.viewport-8-this.thumbHeight())*(this.maxOffset()?this.offset/this.maxOffset():0)).w(9).h(this.thumbHeight()).rounded(5).bg(t.dim+'88')))))
+      .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(t.border).bg(t.surface)
+        .child(Textarea.new(this.input).h(58).w_full().text_size(15).text_color(t.foreground))
+        .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar, soru yanıtları ve dosya ekleri için Terminal görünümünü kullanın.'))
+          .child(this.button('chat-send',this.sending?'Gönderiliyor…':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
+  }
+}
