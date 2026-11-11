@@ -80,6 +80,33 @@ class BridgeTests(unittest.TestCase):
             messages=bridge.records(p,'claude')
         self.assertEqual(len(messages),700)
         self.assertEqual(messages[0]['text'],'0');self.assertEqual(messages[-1]['text'],'699')
+    def test_compact_summary_is_a_notice_not_a_user_message(self):
+        rows=[{'type':'system','subtype':'compact_boundary','uuid':'b','content':'Conversation compacted'},
+              {'type':'user','uuid':'s','isCompactSummary':True,'isVisibleInTranscriptOnly':True,'message':{'role':'user','content':'This session is being continued from a previous conversation...'}},
+              {'type':'user','uuid':'u','message':{'role':'user','content':'Devam et'}}]
+        messages=self.claude_records(rows)
+        self.assertEqual([m['role'] for m in messages],['notice','user'])
+        self.assertNotIn('continued',messages[0]['text'])
+    def test_slash_command_and_local_output(self):
+        rows=[{'type':'user','uuid':'c','message':{'role':'user','content':'<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>opus</command-args>'}},
+              {'type':'user','uuid':'o','message':{'role':'user','content':'<local-command-stdout>\x1b[2mSet model to Opus\x1b[22m</local-command-stdout>'}},
+              {'type':'user','uuid':'e','message':{'role':'user','content':'<local-command-stdout></local-command-stdout>'}},
+              {'type':'user','uuid':'x','message':{'role':'user','content':'Şunu açıkla: <command-name>/model</command-name>'}}]
+        messages=self.claude_records(rows)
+        self.assertEqual([(m['role'],m['text']) for m in messages],[('user','/model opus'),('notice','Set model to Opus'),('user','Şunu açıkla: <command-name>/model</command-name>')])
+    def test_limit_reads_only_the_newest_messages(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'test.jsonl'
+            rows=[]
+            for i in range(300):
+                rows.append({'uuid':f'a{i}','message':{'role':'assistant','content':[{'type':'text','text':str(i)},{'type':'tool_use','id':f't{i}','name':'Read','input':{}}]}})
+                rows.append({'uuid':f'r{i}','message':{'role':'user','content':[{'type':'tool_result','tool_use_id':f't{i}','content':f'out{i}'}]}})
+            p.write_text(''.join(json.dumps(r)+'\n' for r in rows))
+            messages,more=bridge.read_records(p,'claude',3)
+            everything,rest=bridge.read_records(p,'claude')
+        self.assertTrue(more);self.assertFalse(rest);self.assertEqual(len(everything),600)
+        self.assertEqual([m['text'] for m in messages if m['role']=='assistant'],['297','298','299'])
+        self.assertEqual([m.get('output') for m in messages if m['role']=='tool'],['out297','out298','out299'])
     def test_short_reply_binding_needs_two_matches_and_unique_session(self):
         texts=['Araç kullanma. Sadece iki satırlı mesaj alındı. yaz.','iki satırlı mesaj alındı.']
         screen=' '.join(texts)

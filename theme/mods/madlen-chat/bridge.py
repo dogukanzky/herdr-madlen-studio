@@ -76,10 +76,14 @@ def codex_item(item,ordinal):
     return None
 
 
-def projected(sid):
+def projected(sid,limit=None):
+    out=[];shown=0;more=False
     with b.database(Path.home()/'.codex/thread_history_1.sqlite') as db:
-        rows=db.execute("SELECT rollout_ordinal,item_json FROM thread_items WHERE thread_id=? AND item_type!='reasoning' ORDER BY rollout_ordinal DESC",(sid,)).fetchall()
-    return [v for i,raw in reversed(rows) if (v:=codex_item(json.loads(raw),i)) and (v.get('text') or v.get('attachments'))]
+        for i,raw in db.execute("SELECT rollout_ordinal,item_json FROM thread_items WHERE thread_id=? AND item_type!='reasoning' ORDER BY rollout_ordinal DESC",(sid,)):
+            if limit and shown>=limit:more=True;break
+            v=codex_item(json.loads(raw),i)
+            if v and (v.get('text') or v.get('attachments')):out.append(v);shown+=v['role']!='tool'
+    return out[::-1],more
 
 
 def claude_system_event(record, text, rid):
@@ -100,45 +104,81 @@ def claude_system_event(record, text, rid):
     return tool('system-'+rid,'Sistem bildirimi',text)
 
 
-def records(path,kind):
-    out=[]; results={}
-    rows=list(enumerate(b.reverse_json(path)))
-    for ordinal,r in reversed(rows):
-        if r.get('isSidechain'):continue
-        # API request blobs duplicate turns and include hidden prompt wrappers.
-        if kind=='claude' and r.get('type') not in (None,'user','assistant'):continue
-        p=r.get('payload',{}) if kind=='codex' else r.get('message',{})
-        if kind=='codex' and r.get('type')!='response_item':continue
-        role=p.get('role');content=p.get('content',[]);rid=r.get('uuid') or str(ordinal)
-        if kind=='codex':
-            typ=p.get('type')
-            if typ=='message' and role in ('user','assistant') and p.get('channel')!='analysis':
-                txt=clean(text_content(content))
-                if txt:out.append(dict(id=rid,role=role,text=txt))
-            elif typ in ('function_call','custom_tool_call'):
-                out.append(tool(p.get('call_id',rid),p.get('name','Araç'),p.get('arguments') or p.get('input','')))
-            elif typ in ('function_call_output','custom_tool_call_output'):results[p.get('call_id')]=p.get('output')
-        elif role in ('user','assistant'):
-            txt=clean(text_content(content));attachments=images.from_content(content) if role=='user' else []
-            if txt or attachments:
-                event=claude_system_event(r,txt,rid) if role=='user' else None
-                out.append(event if event is not None else dict(id=rid,role=role,text=txt,attachments=attachments))
-            for c in content if isinstance(content,list) else []:
-                if c.get('type')=='tool_use':out.append(tool(c.get('id',rid),c.get('name','Araç'),c.get('input',{})))
-                elif c.get('type')=='tool_result':results[c.get('tool_use_id')]=text_content(c.get('content'))
+COMMAND=re.compile(r'(?:\s*<(command-name|command-message|command-args)>.*?</\1>)+\s*',re.S)
+LOCAL_OUTPUT=re.compile(r'\s*<local-command-(stdout|stderr)>(.*?)</local-command-\1>\s*',re.S)
+ANSI=re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def claude_local_command(text,rid):
+    """Claude Code stores a typed slash command and its local output as plain user records."""
+    if COMMAND.fullmatch(text):
+        tags={k:v.strip() for k,v in re.findall(r'<(command-name|command-args)>(.*?)</\1>',text,re.S)}
+        name=tags.get('command-name','')
+        if name:return [dict(id=rid,role='user',text=' '.join(filter(None,(name if name.startswith('/') else '/'+name,tags.get('command-args',"")))),attachments=[])]
+    match=LOCAL_OUTPUT.fullmatch(text)
+    if match:
+        output=ANSI.sub('',match.group(2)).strip()
+        return [dict(id=rid,role='notice',text=output)] if output else []
+    return None
+
+
+def record_items(r,kind,ordinal,results):
+    items=[]
+    if r.get('isSidechain'):return items
+    # API request blobs duplicate turns and include hidden prompt wrappers.
+    if kind=='claude' and r.get('type') not in (None,'user','assistant'):return items
+    p=r.get('payload',{}) if kind=='codex' else r.get('message',{})
+    if kind=='codex' and r.get('type')!='response_item':return items
+    role=p.get('role');content=p.get('content',[]);rid=r.get('uuid') or str(ordinal)
+    if kind=='codex':
+        typ=p.get('type')
+        if typ=='message' and role in ('user','assistant') and p.get('channel')!='analysis':
+            txt=clean(text_content(content))
+            if txt:items.append(dict(id=rid,role=role,text=txt))
+        elif typ in ('function_call','custom_tool_call'):
+            items.append(tool(p.get('call_id',rid),p.get('name','Araç'),p.get('arguments') or p.get('input','')))
+        elif typ in ('function_call_output','custom_tool_call_output'):results[p.get('call_id')]=p.get('output')
+    elif r.get('isCompactSummary') is True:
+        # Claude Code writes the compaction summary as a user record; nobody typed it.
+        items.append(dict(id=rid,role='notice',text='Bağlam özetlendi (compact) · agent öncesini bu özetten hatırlıyor'))
+    elif role in ('user','assistant'):
+        txt=clean(text_content(content));attachments=images.from_content(content) if role=='user' else []
+        if txt or attachments:
+            event=claude_system_event(r,txt,rid) if role=='user' else None
+            command=claude_local_command(txt,rid) if role=='user' and event is None and not attachments else None
+            if command is not None:items.extend(command)
+            else:items.append(event if event is not None else dict(id=rid,role=role,text=txt,attachments=attachments))
+        for c in content if isinstance(content,list) else []:
+            if c.get('type')=='tool_use':items.append(tool(c.get('id',rid),c.get('name','Araç'),c.get('input',{})))
+            elif c.get('type')=='tool_result':results[c.get('tool_use_id')]=text_content(c.get('content'))
+    return items
+
+
+def read_records(path,kind,limit=None):
+    """Read from the end of the log; with a limit, stop after that many non-tool messages."""
+    chunks=[]; results={}; shown=0; more=False
+    for ordinal,r in enumerate(b.reverse_json(path)):
+        if limit and shown>=limit:more=True;break
+        items=record_items(r,kind,ordinal,results)
+        if items:chunks.append(items);shown+=sum(m['role']!='tool' for m in items)
+    out=[m for items in reversed(chunks) for m in items]
     for m in out:
         if m['id'] in results:m['output']=str(results[m['id']])[:10000]
-    return out
+    return out,more
 
 
-def snapshot(address):
+def records(path,kind,limit=None):
+    return read_records(path,kind,limit)[0]
+
+
+def snapshot(address,limit=None):
     if "/" in address:
         import remote
-        return remote.snapshot(address)
+        return remote.snapshot(address,limit)
     t,kind,sid,path,projection=resolve(address)
-    messages=projected(sid) if projection else records(path,kind)
+    messages,more=projected(sid,limit) if projection else read_records(path,kind,limit)
     status=(t.get('status') or {}).get('state','idle')
-    return dict(terminal=address,session=sid,kind=kind,status=status,messages=messages)
+    return dict(terminal=address,session=sid,kind=kind,status=status,messages=messages,more=more)
 
 
 def send(address,expected,text,attachments=None):
@@ -203,9 +243,9 @@ def send(address,expected,text,attachments=None):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--terminal',required=True);p.add_argument('--session');p.add_argument('--text');p.add_argument('--attachments');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--terminal',required=True);p.add_argument('--session');p.add_argument('--text');p.add_argument('--attachments');p.add_argument('--limit',type=int);a=p.parse_args()
     try:
-        result=send(a.terminal,a.session,a.text,json.loads(a.attachments) if a.attachments else None) if a.text is not None else snapshot(a.terminal)
+        result=send(a.terminal,a.session,a.text,json.loads(a.attachments) if a.attachments else None) if a.text is not None else snapshot(a.terminal,a.limit)
         print(json.dumps(result,ensure_ascii=False))
     except Exception as e:
         print(json.dumps(dict(error=str(e)),ensure_ascii=False));return 1
