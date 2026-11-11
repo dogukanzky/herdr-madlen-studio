@@ -16,7 +16,10 @@ export default class MadlenChat extends View {
     this.input.set_soft_wrap(true);
     this.input.on('submit',(e,cx)=>{if(!e.shift)this.send(cx);});
     this.input.on('paste_other',(_e,cx)=>this.pasteImages(cx));
-    this.input.on('change',()=>{if(this.target){
+    this.input.on('change',(_e,cx)=>{
+      // Repaint only when the draft enters or leaves `!` command mode, not per keystroke.
+      if(this.shellMode(this.input.value())!==this.shellDraft)cx.notify();
+      if(this.target){
         this.drafts[this.target.terminal]=this.input.value();
         this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});
       }});
@@ -94,6 +97,8 @@ export default class MadlenChat extends View {
     this.anchor={terminal:target.terminal,fromBottom:this.contentHeight-this.offset,limit};this.follow=false;this.refresh(cx,true);cx.notify();
   }
   mono(){return settings()?.font_family??'Menlo';}
+  // Claude Code runs a prompt that starts with `!` as a shell command (bash mode).
+  shellMode(text){return this.data?.kind==='claude'&&text.trimStart().startsWith('!');}
   // Output of a `!` command typed in Claude Code: under the command, terminal-like, long output folded.
   shell(m,t){
     const id=`shell-${m.id}`, open=this.expanded[id], lines=(m.text||'').split('\n'), hidden=open?0:Math.max(0,lines.length-SHELL_LINES);
@@ -198,6 +203,7 @@ export default class MadlenChat extends View {
     const data=same?this.data:null;
     const status=terminals().find(x=>x.address===target?.terminal)?.status??data?.status;
     const ready=data&&!this.error&&!this.sending&&!this.pasting&&!this.staged[target?.terminal]&&['idle','done'].includes(status);
+    const shell=this.shellMode(this.input.value());this.shellDraft=shell;
     const groups=[];
     for(const m of data?.messages??[]){if(m.role==='tool'){if(groups.at(-1)?.role==='tools')groups.at(-1).items.push(m);else groups.push({id:`tools-${m.id}`,role:'tools',items:[m]});}else groups.push(m);}
 
@@ -230,12 +236,14 @@ export default class MadlenChat extends View {
         .when(this.maxOffset()>0,e=>e.child(div().id('chat-scroll-track').absolute().right(3).top(4).bottom(4).w(9).rounded(5).bg(t.border+'55').cursor_pointer()
           .on_mouse_down('left',(event,cx)=>{if(!event.local_position)return;this.dragging=true;this.scrollThumb(event.local_position.y,cx);cx.stop_propagation();})
           .child(div().absolute().top((this.viewport-8-this.thumbHeight())*(this.maxOffset()?this.offset/this.maxOffset():0)).w(9).h(this.thumbHeight()).rounded(5).bg(t.dim+'88')))))
-      .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(t.border).bg(t.surface)
+      .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(shell?t.accent:t.border).bg(shell?t.background:t.surface)
         .when((this.imageDrafts[target?.terminal]??[]).length>0,e=>e.child(h_flex().gap(8).flex_wrap().children(this.imageDrafts[target.terminal].map((a,i)=>this.thumbnail(a,`draft-${i}`,true)))))
         .on_drop((event,cx)=>this.pasteImages(cx,event.paths??[]))
-        .child(Textarea.new(this.input).w_full().min_w(0).flex_none().text_size(15).text_color(t.foreground))
-        .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
+        .child(Textarea.new(this.input).w_full().min_w(0).flex_none().text_size(shell?14:15).text_color(t.foreground).when(shell,e=>e.font_family(this.mono())))
+        .child(h_flex().gap(10).items_center()
+          .when(shell,e=>e.child(div().flex_none().px(7).py(2).rounded(6).bg(t.accent+'26').text_color(t.accent).font_semibold().text_size(11).child('! KOMUT')))
+          .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(shell?t.muted:t.dim).child(shell&&ready?'Claude Code bu satırı kabukta çalıştırır · çıktı sohbete düşer':ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
           .child(this.button('paste-image',this.pasting?'Ekleniyor…':'Görsel yapıştır',cx=>this.pasteImages(cx)))
-          .child(this.button('chat-send',this.sending?'Gönderiliyor…':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
+          .child(this.button('chat-send',this.sending?'Gönderiliyor…':shell?'Çalıştır →':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
   }
 }
