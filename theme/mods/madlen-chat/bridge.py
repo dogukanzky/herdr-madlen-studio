@@ -107,10 +107,12 @@ def claude_system_event(record, text, rid):
 COMMAND=re.compile(r'(?:\s*<(command-name|command-message|command-args)>.*?</\1>)+\s*',re.S)
 LOCAL_OUTPUT=re.compile(r'\s*<local-command-(stdout|stderr)>(.*?)</local-command-\1>\s*',re.S)
 ANSI=re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+SHELL_INPUT=re.compile(r'\s*<bash-input>(.*?)</bash-input>\s*',re.S)
+SHELL_OUTPUT=re.compile(r'\s*<bash-stdout>(.*?)</bash-stdout>\s*(?:<bash-stderr>(.*?)</bash-stderr>\s*)?',re.S)
 
 
 def claude_local_command(text,rid):
-    """Claude Code stores a typed slash command and its local output as plain user records."""
+    """Claude Code stores a typed slash command, a `!` shell command and their local output as plain user records."""
     if COMMAND.fullmatch(text):
         tags={k:v.strip() for k,v in re.findall(r'<(command-name|command-args)>(.*?)</\1>',text,re.S)}
         name=tags.get('command-name','')
@@ -119,6 +121,13 @@ def claude_local_command(text,rid):
     if match:
         output=ANSI.sub('',match.group(2)).strip()
         return [dict(id=rid,role='notice',text=output)] if output else []
+    match=SHELL_INPUT.fullmatch(text)
+    if match:return [dict(id=rid,role='user',text=match.group(1).strip(),shell=True,attachments=[])]
+    match=SHELL_OUTPUT.fullmatch(text)
+    if match:
+        out=ANSI.sub('',match.group(1)).strip();error=ANSI.sub('',match.group(2) or '').strip()
+        if out=='(Bash completed with no output)':out=''
+        return [dict(id=rid,role='shell',text=out[:10000],error=error[:10000])]
     return None
 
 

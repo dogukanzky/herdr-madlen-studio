@@ -1,8 +1,10 @@
 import { View, div, svg, image } from 'gpui-kit';
 import { h_flex, v_flex, TextView, Textarea, TextareaState } from 'gpui-base';
-import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
+import { theme, settings, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
 // Chat renders the newest PAGE messages (tools excluded); older ones load on request.
 const PAGE=40;
+// A `!` command's output shows this many lines until expanded.
+const SHELL_LINES=12;
 const find=(n,id)=>n?.id===id?n:(n?.children??[]).map(c=>find(c,id)).find(Boolean);
 export default class MadlenChat extends View {
   init(_props,cx) {
@@ -14,7 +16,10 @@ export default class MadlenChat extends View {
     this.input.set_soft_wrap(true);
     this.input.on('submit',(e,cx)=>{if(!e.shift)this.send(cx);});
     this.input.on('paste_other',(_e,cx)=>this.pasteImages(cx));
-    this.input.on('change',()=>{if(this.target){
+    this.input.on('change',(_e,cx)=>{
+      // Repaint only when the draft enters or leaves `!` command mode, not per keystroke.
+      if(this.shellMode(this.input.value())!==this.shellDraft)cx.notify();
+      if(this.target){
         this.drafts[this.target.terminal]=this.input.value();
         this.positions.set(this.target.terminal,{offset:this.offset,height:this.contentHeight,follow:this.follow,expanded:this.expanded});
       }});
@@ -91,6 +96,20 @@ export default class MadlenChat extends View {
     const limit=(this.limits[target.terminal]??PAGE)+PAGE;this.limits[target.terminal]=limit;
     this.anchor={terminal:target.terminal,fromBottom:this.contentHeight-this.offset,limit};this.follow=false;this.refresh(cx,true);cx.notify();
   }
+  mono(){return settings()?.font_family??'Menlo';}
+  // Claude Code runs a prompt that starts with `!` as a shell command (bash mode).
+  shellMode(text){return this.data?.kind==='claude'&&text.trimStart().startsWith('!');}
+  // Output of a `!` command typed in Claude Code: under the command, terminal-like, long output folded.
+  shell(m,t){
+    const id=`shell-${m.id}`, open=this.expanded[id], lines=(m.text||'').split('\n'), hidden=open?0:Math.max(0,lines.length-SHELL_LINES);
+    return h_flex().id(id).flex_none().w_full().max_w(this.columnWidth()).mt(-8).justify_end()
+      .child(v_flex().min_w(0).max_w(this.columnWidth()*0.84).px(14).py(10).gap(6).rounded(14).border(1).border_color(t.border).bg(t.surface).overflow_hidden().font_family(this.mono()).text_size(12.5)
+        .when(Boolean(m.text),e=>e.child(div().min_w(0).text_color(t.foreground).child(hidden?lines.slice(0,SHELL_LINES).join('\n'):m.text)))
+        .when(Boolean(m.error),e=>e.child(div().min_w(0).text_color(t.blocked).child(m.error)))
+        .when(!m.text&&!m.error,e=>e.child(div().text_color(t.dim).child('Çıktı yok')))
+        .when(lines.length>SHELL_LINES,e=>e.child(div().id(`toggle-${id}`).font_family('Helvetica Neue').text_size(12).text_color(t.dim).cursor_pointer().hover(s=>s.text_color(t.muted))
+          .on_click((_e,cx)=>{this.follow=false;this.expanded[id]=!open;cx.notify();}).child(open?'▾ Daralt':`▸ ${hidden} satır daha`))));
+  }
   notice(m,t){return h_flex().id(`notice-${m.id}`).flex_none().w_full().max_w(this.columnWidth()).pl(40).gap(10).items_center().text_size(12).text_color(t.dim)
     .child(div().h(1).w(18).flex_none().bg(t.border)).child(div().min_w(0).child(m.text)).child(div().h(1).flex_1().min_w(12).bg(t.border));}
   pasteImages(cx,paths=[]) {
@@ -143,7 +162,8 @@ export default class MadlenChat extends View {
     return h_flex().id(`message-${m.id}`).w_full().max_w(this.columnWidth()).flex_none().gap(12).items_start().when(user,e=>e.justify_end())
       .when(!user,e=>e.child(div().size(24).mt(5).flex_none().rounded_full().bg(t.selected).flex().items_center().justify_center().text_color(t.accent).overflow_hidden().child(image('mods/madlen-heading/mascot.webp').size(24))))
       .child(v_flex().min_w(0).max_w(user?this.columnWidth()*0.84:this.columnWidth()-36).when(!user,e=>e.flex_1().w_full()).gap(8).p(user?16:4).rounded(18).bg(user?'#5746db':t.canvas).text_color(user?'#ffffff':t.foreground)
-        .child(user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
+        .child(m.shell?h_flex().gap(8).items_start().font_family(this.mono()).text_size(13.5).text_color('#ffffff').child(div().flex_none().opacity(0.7).child('!')).child(div().min_w(0).child(m.text))
+          :user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
         .when(Boolean(m.attachments?.length),e=>e.child(h_flex().flex_wrap().gap(8).children(m.attachments.map((a,i)=>this.thumbnail(a,`attachment-${m.id}-${i}`))))));
   }
   tools(group,t){
@@ -183,6 +203,7 @@ export default class MadlenChat extends View {
     const data=same?this.data:null;
     const status=terminals().find(x=>x.address===target?.terminal)?.status??data?.status;
     const ready=data&&!this.error&&!this.sending&&!this.pasting&&!this.staged[target?.terminal]&&['idle','done'].includes(status);
+    const shell=this.shellMode(this.input.value());this.shellDraft=shell;
     const groups=[];
     for(const m of data?.messages??[]){if(m.role==='tool'){if(groups.at(-1)?.role==='tools')groups.at(-1).items.push(m);else groups.push({id:`tools-${m.id}`,role:'tools',items:[m]});}else groups.push(m);}
 
@@ -208,19 +229,21 @@ export default class MadlenChat extends View {
             if(anchored)this.anchor=null;cx.notify();}})
           .when(!data,e=>e.child(div().text_color(t.dim).child(!target?'Bu sekmede desteklenen bir sohbet yok. Terminal görünümünü açabilirsiniz.':this.error?'Terminal oturumunuz çalışmaya devam ediyor.':'Sohbet yükleniyor…')))
           .when(Boolean(data?.more),e=>e.child(h_flex().w_full().max_w(this.columnWidth()).justify_center().child(this.button('chat-older',this.pending.has(target?.terminal)?'Yükleniyor…':'Daha eski mesajları göster',cx=>this.older(cx)))))
-          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):m.role==='notice'?this.notice(m,t):this.message(m,t)))
+          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):m.role==='notice'?this.notice(m,t):m.role==='shell'?this.shell(m,t):this.message(m,t)))
           .child(h_flex().flex_none().pl(40).gap(8).items_center().text_size(12).text_color(status==='working'?t.working:status==='blocked'?t.blocked:t.done)
             .when(status==='working',e=>e.child(svg('mods/madlen-chrome/spinner.svg').size(12).spin(900)))
             .child(div().child(status==='working'?'Yanıt hazırlanıyor…':status==='blocked'?'Devam etmek için yanıtınız gerekiyor.':['idle','done'].includes(status)?'✓ Yanıt tamamlandı':'Oturum bağlanıyor…'))))
         .when(this.maxOffset()>0,e=>e.child(div().id('chat-scroll-track').absolute().right(3).top(4).bottom(4).w(9).rounded(5).bg(t.border+'55').cursor_pointer()
           .on_mouse_down('left',(event,cx)=>{if(!event.local_position)return;this.dragging=true;this.scrollThumb(event.local_position.y,cx);cx.stop_propagation();})
           .child(div().absolute().top((this.viewport-8-this.thumbHeight())*(this.maxOffset()?this.offset/this.maxOffset():0)).w(9).h(this.thumbHeight()).rounded(5).bg(t.dim+'88')))))
-      .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(t.border).bg(t.surface)
+      .child(div().on_key_up((e,cx)=>{if(e.key==='enter'&&!e.modifiers.shift){cx.stop_propagation();this.send(cx);}}).flex_none().w_full().pl(28).pr(44).mb(18).child(v_flex().w_full().max_w(this.columnWidth()).p(12).gap(8).rounded(14).border(1).border_color(shell?t.accent:t.border).bg(shell?t.background:t.surface)
         .when((this.imageDrafts[target?.terminal]??[]).length>0,e=>e.child(h_flex().gap(8).flex_wrap().children(this.imageDrafts[target.terminal].map((a,i)=>this.thumbnail(a,`draft-${i}`,true)))))
         .on_drop((event,cx)=>this.pasteImages(cx,event.paths??[]))
-        .child(Textarea.new(this.input).w_full().min_w(0).flex_none().text_size(15).text_color(t.foreground))
-        .child(h_flex().gap(10).items_center().child(div().flex_1().text_size(12).text_color(t.dim).child(ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
+        .child(Textarea.new(this.input).w_full().min_w(0).flex_none().text_size(shell?14:15).text_color(t.foreground).when(shell,e=>e.font_family(this.mono())))
+        .child(h_flex().gap(10).items_center()
+          .when(shell,e=>e.child(div().flex_none().px(7).py(2).rounded(6).bg(t.accent+'26').text_color(t.accent).font_semibold().text_size(11).child('! KOMUT')))
+          .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(shell?t.muted:t.dim).child(shell&&ready?'Claude Code bu satırı kabukta çalıştırır · çıktı sohbete düşer':ready?'Enter gönderir · Shift+Enter yeni satır':status==='working'?'Agent çalışıyor. Taslağınızı yazabilirsiniz.':'Onaylar ve soru yanıtları için Terminal görünümünü kullanın.'))
           .child(this.button('paste-image',this.pasting?'Ekleniyor…':'Görsel yapıştır',cx=>this.pasteImages(cx)))
-          .child(this.button('chat-send',this.sending?'Gönderiliyor…':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
+          .child(this.button('chat-send',this.sending?'Gönderiliyor…':shell?'Çalıştır →':'Gönder →',cx=>{if(ready)this.send(cx);},Boolean(ready))))));
   }
 }

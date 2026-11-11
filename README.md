@@ -39,7 +39,7 @@ Bu seçenek ayrıca `outputs-browser` modunu ve `~/.local/share/herdr-outputs/He
 
 - Aynı Codex/Claude Code terminaline bağlanır; yeni bir AI oturumu açmaz.
 - Mevcut yerel kayıtları okur. İlk açılışta oturum eşleşmesi gerekir; açılmış sohbetler bellekte tutulur. Kayıt yenilemesi 3 saniyede birdir, token düzeyinde canlı akış değildir.
-- Uzun oturumlarda son 40 mesaj gösterilir; daha eskileri “Daha eski mesajları göster” ile 40’ar 40’ar yüklenir. Compact özeti ve slash komut çıktıları kullanıcı mesajı gibi değil, ince bir ayırıcı satır olarak görünür.
+- Uzun oturumlarda son 40 mesaj gösterilir; daha eskileri “Daha eski mesajları göster” ile 40’ar 40’ar yüklenir. Compact özeti ve slash komut çıktıları kullanıcı mesajı gibi değil, ince bir ayırıcı satır olarak görünür. Claude Code’da `!` ile çalıştırılan komut `! komut` balonu, çıktısı altında terminal kutusu olarak görünür; uzun çıktı katlanır.
 - Enter gönderir, Shift+Enter yeni satır açar. Gönderirken hedef oturum yeniden doğrulanır. Agent çalışıyorsa veya onay bekliyorsa gönderim reddedilir; taslak korunur.
 - Araç ve soru kartları geçmiş kayıt gösterimidir. İzinler, soru seçenekleri, görsel dışındaki dosya ekleri ve slash komutları Terminal’den kullanılır.
 - Görseller sohbette önizlenir; tıklayınca büyür. Cmd+V veya “Görsel yapıştır” ile panodan ekleyin; göndermeden önce kaldırabilirsiniz. En fazla 3 görsel, görsel başına 20 MB. Görsel yapıştırma macOS Xcode Command Line Tools (`swiftc`) gerektirir; küçük yerel yardımcı ilk kullanımda derlenir. Görseller yalnızca Gönder ile mevcut agent oturumuna aktarılır.
