@@ -94,6 +94,13 @@ class BridgeTests(unittest.TestCase):
               {'type':'user','uuid':'x','message':{'role':'user','content':'Şunu açıkla: <command-name>/model</command-name>'}}]
         messages=self.claude_records(rows)
         self.assertEqual([(m['role'],m['text']) for m in messages],[('user','/model opus'),('notice','Set model to Opus'),('user','Şunu açıkla: <command-name>/model</command-name>')])
+    def test_shell_command_and_output(self):
+        rows=[{'type':'user','uuid':'i','message':{'role':'user','content':'<bash-input> gh repo fork x/y --clone=false</bash-input>'}},
+              {'type':'user','uuid':'o','turnOrigin':'human','message':{'role':'user','content':'<bash-stdout>https://github.com/a/y\x1b[0m</bash-stdout><bash-stderr>warning</bash-stderr>'}},
+              {'type':'user','uuid':'e','turnOrigin':'human','message':{'role':'user','content':'<bash-stdout>(Bash completed with no output)</bash-stdout><bash-stderr></bash-stderr>'}}]
+        messages=self.claude_records(rows)
+        self.assertEqual((messages[0]['role'],messages[0]['text'],messages[0]['shell']),('user','gh repo fork x/y --clone=false',True))
+        self.assertEqual([(m['role'],m['text'],m['error']) for m in messages[1:]],[('shell','https://github.com/a/y','warning'),('shell','','')])
     def test_limit_reads_only_the_newest_messages(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'test.jsonl'

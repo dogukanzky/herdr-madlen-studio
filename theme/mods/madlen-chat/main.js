@@ -1,8 +1,10 @@
 import { View, div, svg, image } from 'gpui-kit';
 import { h_flex, v_flex, TextView, Textarea, TextareaState } from 'gpui-base';
-import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
+import { theme, settings, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
 // Chat renders the newest PAGE messages (tools excluded); older ones load on request.
 const PAGE=40;
+// A `!` command's output shows this many lines until expanded.
+const SHELL_LINES=12;
 const find=(n,id)=>n?.id===id?n:(n?.children??[]).map(c=>find(c,id)).find(Boolean);
 export default class MadlenChat extends View {
   init(_props,cx) {
@@ -91,6 +93,18 @@ export default class MadlenChat extends View {
     const limit=(this.limits[target.terminal]??PAGE)+PAGE;this.limits[target.terminal]=limit;
     this.anchor={terminal:target.terminal,fromBottom:this.contentHeight-this.offset,limit};this.follow=false;this.refresh(cx,true);cx.notify();
   }
+  mono(){return settings()?.font_family??'Menlo';}
+  // Output of a `!` command typed in Claude Code: under the command, terminal-like, long output folded.
+  shell(m,t){
+    const id=`shell-${m.id}`, open=this.expanded[id], lines=(m.text||'').split('\n'), hidden=open?0:Math.max(0,lines.length-SHELL_LINES);
+    return h_flex().id(id).flex_none().w_full().max_w(this.columnWidth()).mt(-8).justify_end()
+      .child(v_flex().min_w(0).max_w(this.columnWidth()*0.84).px(14).py(10).gap(6).rounded(14).border(1).border_color(t.border).bg(t.surface).overflow_hidden().font_family(this.mono()).text_size(12.5)
+        .when(Boolean(m.text),e=>e.child(div().min_w(0).text_color(t.foreground).child(hidden?lines.slice(0,SHELL_LINES).join('\n'):m.text)))
+        .when(Boolean(m.error),e=>e.child(div().min_w(0).text_color(t.blocked).child(m.error)))
+        .when(!m.text&&!m.error,e=>e.child(div().text_color(t.dim).child('Çıktı yok')))
+        .when(lines.length>SHELL_LINES,e=>e.child(div().id(`toggle-${id}`).font_family('Helvetica Neue').text_size(12).text_color(t.dim).cursor_pointer().hover(s=>s.text_color(t.muted))
+          .on_click((_e,cx)=>{this.follow=false;this.expanded[id]=!open;cx.notify();}).child(open?'▾ Daralt':`▸ ${hidden} satır daha`))));
+  }
   notice(m,t){return h_flex().id(`notice-${m.id}`).flex_none().w_full().max_w(this.columnWidth()).pl(40).gap(10).items_center().text_size(12).text_color(t.dim)
     .child(div().h(1).w(18).flex_none().bg(t.border)).child(div().min_w(0).child(m.text)).child(div().h(1).flex_1().min_w(12).bg(t.border));}
   pasteImages(cx,paths=[]) {
@@ -143,7 +157,8 @@ export default class MadlenChat extends View {
     return h_flex().id(`message-${m.id}`).w_full().max_w(this.columnWidth()).flex_none().gap(12).items_start().when(user,e=>e.justify_end())
       .when(!user,e=>e.child(div().size(24).mt(5).flex_none().rounded_full().bg(t.selected).flex().items_center().justify_center().text_color(t.accent).overflow_hidden().child(image('mods/madlen-heading/mascot.webp').size(24))))
       .child(v_flex().min_w(0).max_w(user?this.columnWidth()*0.84:this.columnWidth()-36).when(!user,e=>e.flex_1().w_full()).gap(8).p(user?16:4).rounded(18).bg(user?'#5746db':t.canvas).text_color(user?'#ffffff':t.foreground)
-        .child(user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
+        .child(m.shell?h_flex().gap(8).items_start().font_family(this.mono()).text_size(13.5).text_color('#ffffff').child(div().flex_none().opacity(0.7).child('!')).child(div().min_w(0).child(m.text))
+          :user?div().text_size(15).text_color('#ffffff').child(m.text||'Görsel eklendi'):this.markdown(`md-${m.id}`,m.text||''))
         .when(Boolean(m.attachments?.length),e=>e.child(h_flex().flex_wrap().gap(8).children(m.attachments.map((a,i)=>this.thumbnail(a,`attachment-${m.id}-${i}`))))));
   }
   tools(group,t){
@@ -208,7 +223,7 @@ export default class MadlenChat extends View {
             if(anchored)this.anchor=null;cx.notify();}})
           .when(!data,e=>e.child(div().text_color(t.dim).child(!target?'Bu sekmede desteklenen bir sohbet yok. Terminal görünümünü açabilirsiniz.':this.error?'Terminal oturumunuz çalışmaya devam ediyor.':'Sohbet yükleniyor…')))
           .when(Boolean(data?.more),e=>e.child(h_flex().w_full().max_w(this.columnWidth()).justify_center().child(this.button('chat-older',this.pending.has(target?.terminal)?'Yükleniyor…':'Daha eski mesajları göster',cx=>this.older(cx)))))
-          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):m.role==='notice'?this.notice(m,t):this.message(m,t)))
+          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):m.role==='notice'?this.notice(m,t):m.role==='shell'?this.shell(m,t):this.message(m,t)))
           .child(h_flex().flex_none().pl(40).gap(8).items_center().text_size(12).text_color(status==='working'?t.working:status==='blocked'?t.blocked:t.done)
             .when(status==='working',e=>e.child(svg('mods/madlen-chrome/spinner.svg').size(12).spin(900)))
             .child(div().child(status==='working'?'Yanıt hazırlanıyor…':status==='blocked'?'Devam etmek için yanıtınız gerekiyor.':['idle','done'].includes(status)?'✓ Yanıt tamamlandı':'Oturum bağlanıyor…'))))
