@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='madlen-chat-') as directory:
         return original(args)
     bridge.b.run=run
     try:
-        result=bridge.snapshot(request['address'])
+        result=bridge.snapshot(request['address'],request.get('limit'))
         result['process_pid']=fg['pid']
         for message in result['messages']:
             for attachment in message.get('attachments',[]):
@@ -44,14 +44,14 @@ def split(address):
     return address.split('/',1)
 
 
-def snapshot(address):
+def snapshot(address,limit=None):
     import bridge
     machine,local=split(address)
     t,kind,pid=bridge.terminal(address)
     screen=bridge.b.run(['hc','read',address,'--lines','0','--json'])
     if screen.returncode:raise ValueError('Uzak terminal okunamadı; makine bağlantısını kontrol edin.')
     folder=Path(__file__).parent
-    request=dict(cached_images=[p.name for p in (images.HOME/'data/madlen-chat/images').glob('*') if p.suffix!='.json'],address=local,terminal=t,kind=kind,screen=json.loads(screen.stdout).get('text',''),
+    request=dict(limit=limit,cached_images=[p.name for p in (images.HOME/'data/madlen-chat/images').glob('*') if p.suffix!='.json'],address=local,terminal=t,kind=kind,screen=json.loads(screen.stdout).get('text',''),
                  sources={name:(folder/name).read_text() for name in ('bridge.py','binding.py','images.py','clipboard.py')})
     try:
         response=subprocess.run(['hc','exec','--on',machine,'--timeout','25','--stdin','python3','-c',WORKER],input=json.dumps(request),capture_output=True,text=True,timeout=30)

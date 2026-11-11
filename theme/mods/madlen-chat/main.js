@@ -1,11 +1,13 @@
 import { View, div, svg, image } from 'gpui-kit';
 import { h_flex, v_flex, TextView, Textarea, TextareaState } from 'gpui-base';
 import { theme, layout, shared, setShared, spaces, panes, terminals, run, exec, appHome, props, openOverlay, closeOverlay } from 'herdr';
+// Chat renders the newest PAGE messages (tools excluded); older ones load on request.
+const PAGE=40;
 const find=(n,id)=>n?.id===id?n:(n?.children??[]).map(c=>find(c,id)).find(Boolean);
 export default class MadlenChat extends View {
   init(_props,cx) {
     this.previewWidth=800;this.previewHeight=600;if(props()?.preview)return;
-    this.imageDrafts={};this.pasting=false;this.staged={};
+    this.imageDrafts={};this.pasting=false;this.staged={};this.limits={};this.raw=new Map();this.anchor=null;this.reload=new Set();
     this.dragging=false;this.offset=0;this.viewport=400;this.viewportWidth=1000;this.contentHeight=400;this.follow=true;this.historyKey=0;this.data=null;this.error='';this.sendError='';this.pending=new Set();this.cache=new Map();this.positions=new Map();this.sending=false;this.expanded={};this.drafts={};this.target=null;
     this.input=TextareaState.new({placeholder:'Mesajınızı yazın…',rows:3});
     this.input.set_auto_grow(3,10);
@@ -33,7 +35,7 @@ export default class MadlenChat extends View {
       ??candidates.find(p=>p.focused&&eligible(p))??candidates.find(eligible);
     return p?{terminal:p.terminal,pane:p.pane,tab}:null;
   }
-  refresh(cx) {
+  refresh(cx,force=false) {
     if(find(layout(),'conversation-surface')?.active!=='madlen-chat-view')return;
     const target=this.currentTarget();
     // An unsupported tab remains an explicit empty Chat view, not a forced mode switch.
@@ -54,25 +56,43 @@ export default class MadlenChat extends View {
       this.offset=this.follow?this.maxOffset():Math.min(position?.offset??0,this.maxOffset());this.historyKey++;
     }
     if(shared('madlen.chat.target')?.pane!==target.pane)setShared('madlen.chat.target',target);
-    if(this.pending.has(target.terminal))return;
+    if(this.pending.has(target.terminal)){if(force)this.reload.add(target.terminal);return;}
     this.pending.add(target.terminal);
     cx.spawn(async cx=>{
+      let changed=true;const limit=this.limits[target.terminal]??PAGE;
       try {
-        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal],{timeout:target.terminal.includes('/')?35000:20000});
+        const r=await exec('/usr/bin/python3',[`${appHome()}/mods/madlen-chat/bridge.py`,'--terminal',target.terminal,'--limit',String(limit)],{timeout:target.terminal.includes('/')?35000:20000});
+        // The 3 s poll usually returns the same snapshot; re-rendering it would rebuild every message.
+        const older=this.anchor?.terminal===target.terminal&&this.anchor.limit===limit;
+        if(r.stdout===this.raw.get(target.terminal)&&this.cache.has(target.terminal)){
+          if(older)this.anchor=null;
+          changed=this.target?.terminal===target.terminal&&Boolean(this.error);
+          if(changed)this.error='';
+          return;
+        }
         const data=JSON.parse(r.stdout);
         if(data.error)throw new Error(data.error);
+        this.raw.set(target.terminal,r.stdout);if(older)this.anchor.ready=true;
         const staged=this.staged[target.terminal];
         if(staged&&(data.session!==staged.session||data.messages.filter(m=>m.role==='user').at(-1)?.id!==staged.last)){
           delete this.staged[target.terminal];this.imageDrafts[target.terminal]=[];
           if(this.target?.terminal===target.terminal)this.sendError='';
         }
         this.cache.delete(target.terminal);this.cache.set(target.terminal,data);
-        if(this.cache.size>12)this.cache.delete(this.cache.keys().next().value);
+        if(this.cache.size>12){const old=this.cache.keys().next().value;this.cache.delete(old);this.raw.delete(old);}
         if(this.target?.terminal===target.terminal){this.data=data;this.error='';}
       }catch(e){if(this.target?.terminal===target.terminal)this.error=String(e.message??e);}
-      finally{this.pending.delete(target.terminal);cx.notify();}
+      finally{this.pending.delete(target.terminal);if(changed)cx.notify();if(this.reload.delete(target.terminal))this.refresh(cx);}
     });
   }
+  older(cx) {
+    const target=this.target;if(!target)return;
+    // Keep the message under the pointer in place while older ones grow the content above it.
+    const limit=(this.limits[target.terminal]??PAGE)+PAGE;this.limits[target.terminal]=limit;
+    this.anchor={terminal:target.terminal,fromBottom:this.contentHeight-this.offset,limit};this.follow=false;this.refresh(cx,true);cx.notify();
+  }
+  notice(m,t){return h_flex().id(`notice-${m.id}`).flex_none().w_full().max_w(this.columnWidth()).pl(40).gap(10).items_center().text_size(12).text_color(t.dim)
+    .child(div().h(1).w(18).flex_none().bg(t.border)).child(div().min_w(0).child(m.text)).child(div().h(1).flex_1().min_w(12).bg(t.border));}
   pasteImages(cx,paths=[]) {
     const target=this.target;if(!target||this.pasting||this.sending)return;
     if((this.imageDrafts[target.terminal]??[]).length>=3){this.sendError='Bir mesaja en fazla 3 görsel ekleyebilirsiniz.';cx.notify();return;}
@@ -181,9 +201,14 @@ export default class MadlenChat extends View {
         .on_mouse_move((e,cx)=>{if(!this.dragging||!e.local_position)return;this.scrollThumb(e.local_position.y-4,cx);})
         .on_scroll_wheel((e,cx)=>{const dy=e.delta?.y??0;if(!dy)return;this.offset=Math.max(0,Math.min(this.maxOffset(),this.offset-dy));this.follow=this.offset>=this.maxOffset()-3;cx.stop_propagation();cx.notify();})
         .child(v_flex().id(`chat-content-${this.historyKey}`).absolute().top(-this.offset).left(0).right(16).px(28).py(22).gap(18).items_start()
-          .on_size_change((size,cx)=>{const h=Math.ceil(size.height);if(h!==this.contentHeight){this.contentHeight=h;this.offset=this.follow?this.maxOffset():Math.min(this.offset,this.maxOffset());cx.notify();}})
+          .on_size_change((size,cx)=>{const h=Math.ceil(size.height);if(h!==this.contentHeight){
+            const anchored=Boolean(this.anchor?.ready)&&this.anchor.terminal===this.target?.terminal&&h>this.contentHeight;
+            this.contentHeight=h;
+            this.offset=anchored?Math.max(0,Math.min(this.maxOffset(),h-this.anchor.fromBottom)):this.follow?this.maxOffset():Math.min(this.offset,this.maxOffset());
+            if(anchored)this.anchor=null;cx.notify();}})
           .when(!data,e=>e.child(div().text_color(t.dim).child(!target?'Bu sekmede desteklenen bir sohbet yok. Terminal görünümünü açabilirsiniz.':this.error?'Terminal oturumunuz çalışmaya devam ediyor.':'Sohbet yükleniyor…')))
-          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):this.message(m,t)))
+          .when(Boolean(data?.more),e=>e.child(h_flex().w_full().max_w(this.columnWidth()).justify_center().child(this.button('chat-older',this.pending.has(target?.terminal)?'Yükleniyor…':'Daha eski mesajları göster',cx=>this.older(cx)))))
+          .children(groups.map(m=>m.role==='tools'?this.tools(m,t):m.role==='question'?this.question(m,t):m.role==='notice'?this.notice(m,t):this.message(m,t)))
           .child(h_flex().flex_none().pl(40).gap(8).items_center().text_size(12).text_color(status==='working'?t.working:status==='blocked'?t.blocked:t.done)
             .when(status==='working',e=>e.child(svg('mods/madlen-chrome/spinner.svg').size(12).spin(900)))
             .child(div().child(status==='working'?'Yanıt hazırlanıyor…':status==='blocked'?'Devam etmek için yanıtınız gerekiyor.':['idle','done'].includes(status)?'✓ Yanıt tamamlandı':'Oturum bağlanıyor…'))))

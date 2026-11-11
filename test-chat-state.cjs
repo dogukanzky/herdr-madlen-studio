@@ -4,7 +4,7 @@ const views=[{tab:'a',pane:'pa',terminal:'ta',program:{name:'Codex'}},{tab:'b',p
 const ctx={View:class {},Set,Map,Math,JSON,Boolean,String,theme:()=>({}),layout:()=>({id:'conversation-surface',active:selected}),shared:()=>saved,setShared:(_,v)=>saved=v,spaces:()=>[{active:true,tabs:[{id:active,active:true}]}],panes:()=>views,exec:()=>{calls++;return new Promise((resolve,reject)=>pending.push({resolve,reject}));},appHome:()=>'/tmp',run:()=>{throw Error('Unexpected navigation');}};
 let src=fs.readFileSync(require('path').join(__dirname,'theme/mods/madlen-chat/main.js'),'utf8').replace(/^import .*;\n/gm,'').replace('export default class MadlenChat','globalThis.MadlenChat = class MadlenChat');
 vm.createContext(ctx);vm.runInContext(src,ctx);
-const v=new ctx.MadlenChat();Object.assign(v,{pending:new Set(),cache:new Map(),positions:new Map(),drafts:{},staged:{},imageDrafts:{},input:{value:()=>'',set_value:()=>{}},viewport:400,historyKey:0});
+const v=new ctx.MadlenChat();Object.assign(v,{limits:{},raw:new Map(),reload:new Set(),anchor:null,pending:new Set(),cache:new Map(),positions:new Map(),drafts:{},staged:{},imageDrafts:{},input:{value:()=>'',set_value:()=>{}},viewport:400,historyKey:0});
 const jobs=[];const cx={notify(){},spawn(fn){jobs.push(fn(this));}};
 (async()=>{
  v.refresh(cx);assert.equal(v.target.terminal,'ta');assert.equal(calls,1);
